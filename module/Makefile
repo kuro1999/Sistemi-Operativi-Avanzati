@@ -1,4 +1,6 @@
-obj-m += hello_module.o
+obj-m += syscall_throttle.o
+
+syscall_throttle-objs := main.o device.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 
