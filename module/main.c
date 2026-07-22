@@ -4,15 +4,18 @@
 
 #include "device.h"
 #include "monitor_state.h"
+#include "uid_registry.h"
 
 static int __init syscall_throttle_init(void)
 {
     int ret;
 
     st_monitor_state_init();
+    st_uid_registry_init();
 
     ret = st_device_init();
     if (ret != 0) {
+        st_uid_registry_exit();
         st_monitor_state_exit();
         return ret;
     }
@@ -24,10 +27,11 @@ static int __init syscall_throttle_init(void)
 static void __exit syscall_throttle_exit(void)
 {
     /*
-     * Rimuoviamo prima l'interfaccia user-space, in modo che non
-     * possano arrivare nuovi comandi durante il rilascio dello stato.
+     * Prima impediamo l'arrivo di nuovi comandi user-space,
+     * poi rilasciamo i registri e lo stato interno.
      */
     st_device_exit();
+    st_uid_registry_exit();
     st_monitor_state_exit();
 
     pr_info("syscall_throttle: modulo rimosso\n");

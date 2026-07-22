@@ -27,6 +27,40 @@ struct st_monitor_status {
 };
 
 /*
+ * Richiesta relativa a un UID.
+ *
+ * uid contiene il valore numerico dell'UID nello user-space.
+ * reserved deve essere impostato a zero.
+ */
+struct st_uid_request {
+    __u32 uid;
+    __u32 reserved;
+};
+
+/*
+ * Numero di UID attualmente presenti nel registro.
+ */
+struct st_uid_count {
+    __u32 count;
+    __u32 reserved;
+};
+
+/*
+ * Richiesta per ottenere l'elenco degli UID registrati.
+ *
+ * uids_ptr contiene l'indirizzo user-space di un array di __u32.
+ * capacity indica quanti elementi può contenere l'array.
+ * count viene scritto dal kernel con il numero di UID registrati.
+ * reserved deve essere inizializzato a zero.
+ */
+struct st_uid_list_request {
+    __aligned_u64 uids_ptr;
+    __u32 capacity;
+    __u32 count;
+    __u32 reserved[2];
+};
+
+/*
  * Comando minimale usato per verificare la comunicazione con il driver.
  */
 #define ST_IOCTL_PING \
@@ -50,5 +84,34 @@ struct st_monitor_status {
  */
 #define ST_IOCTL_GET_STATUS \
     _IOR(ST_IOCTL_MAGIC, 0x03, struct st_monitor_status)
+
+/*
+ * Gestione del registro UID.
+ *
+ * _IOW indica che la struttura viene trasferita dallo user-space
+ * verso il kernel.
+ */
+#define ST_IOCTL_UID_ADD \
+    _IOW(ST_IOCTL_MAGIC, 0x10, struct st_uid_request)
+
+#define ST_IOCTL_UID_REMOVE \
+    _IOW(ST_IOCTL_MAGIC, 0x11, struct st_uid_request)
+
+/*
+ * Restituisce il numero di UID registrati.
+ *
+ * La struttura viene trasferita dal kernel verso lo user-space.
+ */
+#define ST_IOCTL_UID_GET_COUNT \
+    _IOR(ST_IOCTL_MAGIC, 0x12, struct st_uid_count)
+
+/*
+ * Restituisce l'elenco degli UID registrati.
+ *
+ * _IOWR indica che la struttura viene trasferita in entrambe
+ * le direzioni tra user-space e kernel.
+ */
+#define ST_IOCTL_UID_LIST \
+    _IOWR(ST_IOCTL_MAGIC, 0x13, struct st_uid_list_request)
 
 #endif
