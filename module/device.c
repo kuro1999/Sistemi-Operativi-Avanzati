@@ -1,12 +1,17 @@
+#include <linux/cred.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
+#include <linux/sched.h>
+#include <linux/uaccess.h>
+#include <linux/uidgid.h>
 
 #include <syscall_throttle.h>
 
 #include "device.h"
+#include "monitor_state.h"
 
 static int st_device_open(struct inode *inode, struct file *file)
 {
@@ -20,27 +25,79 @@ static int st_device_release(struct inode *inode, struct file *file)
     return 0;
 }
 
+/*
+ * La traccia richiede che le modifiche alla configurazione siano
+ * consentite esclusivamente a un thread con effective UID pari a 0.
+ */
+static bool st_caller_is_root(void)
+{
+    return uid_eq(current_euid(), GLOBAL_ROOT_UID);
+}
+
+static long st_ioctl_get_status(unsigned long argument)
+{
+    bool enabled = st_monitor_is_enabled();
+
+    struct st_monitor_status status = {
+        .enabled = enabled ? 1U : 0U,
+        .reserved = 0U,
+    };
+
+    if (copy_to_user((void __user *)argument,
+                     &status,
+                     sizeof(status)) != 0) {
+        pr_warn("syscall_throttle: GET_STATUS fallito per pid=%d: "
+                "puntatore user non valido\n",
+                current->pid);
+        return -EFAULT;
+    }
+
+    pr_info("syscall_throttle: GET_STATUS da pid=%d: monitor %s\n",
+            current->pid,
+            enabled ? "attivo" : "disattivato");
+
+    return 0;
+}
+
 static long st_device_ioctl(struct file *file,
                             unsigned int command,
                             unsigned long argument)
 {
-    /*
-     * Questi parametri non sono ancora necessari per ST_IOCTL_PING.
-     * Verranno usati dai futuri comandi ioctl.
-     */
     (void)file;
-    (void)argument;
 
     switch (command) {
     case ST_IOCTL_PING:
         pr_info("syscall_throttle: ricevuto ioctl PING\n");
         return 0;
 
+    case ST_IOCTL_ENABLE:
+        if (!st_caller_is_root()) {
+            pr_warn("syscall_throttle: ENABLE rifiutato: "
+                    "pid=%d euid=%u\n",
+                    current->pid,
+                    __kuid_val(current_euid()));
+            return -EPERM;
+        }
+
+        st_monitor_enable();
+        return 0;
+
+    case ST_IOCTL_DISABLE:
+        if (!st_caller_is_root()) {
+            pr_warn("syscall_throttle: DISABLE rifiutato: "
+                    "pid=%d euid=%u\n",
+                    current->pid,
+                    __kuid_val(current_euid()));
+            return -EPERM;
+        }
+
+        st_monitor_disable();
+        return 0;
+
+    case ST_IOCTL_GET_STATUS:
+        return st_ioctl_get_status(argument);
+
     default:
-        /*
-         * ENOTTY è l'errore convenzionale restituito quando
-         * un device non riconosce un comando ioctl.
-         */
         return -ENOTTY;
     }
 }

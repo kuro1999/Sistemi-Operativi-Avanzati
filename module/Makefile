@@ -2,7 +2,7 @@ ccflags-y += -I$(src)/../include/uapi
 
 obj-m += syscall_throttle.o
 
-syscall_throttle-objs := main.o device.o
+syscall_throttle-objs := main.o device.o monitor_state.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 
