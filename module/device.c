@@ -1,11 +1,12 @@
+#include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
 
-#include "device.h"
+#include <syscall_throttle.h>
 
-#define ST_DEVICE_NAME "syscall_throttle"
+#include "device.h"
 
 static int st_device_open(struct inode *inode, struct file *file)
 {
@@ -19,16 +20,36 @@ static int st_device_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-/*
- * Tabella delle operazioni supportate dal character device.
- *
- * In seguito aggiungeremo:
- *     .unlocked_ioctl = st_device_ioctl
- */
+static long st_device_ioctl(struct file *file,
+                            unsigned int command,
+                            unsigned long argument)
+{
+    /*
+     * Questi parametri non sono ancora necessari per ST_IOCTL_PING.
+     * Verranno usati dai futuri comandi ioctl.
+     */
+    (void)file;
+    (void)argument;
+
+    switch (command) {
+    case ST_IOCTL_PING:
+        pr_info("syscall_throttle: ricevuto ioctl PING\n");
+        return 0;
+
+    default:
+        /*
+         * ENOTTY è l'errore convenzionale restituito quando
+         * un device non riconosce un comando ioctl.
+         */
+        return -ENOTTY;
+    }
+}
+
 static const struct file_operations st_file_operations = {
     .owner = THIS_MODULE,
     .open = st_device_open,
     .release = st_device_release,
+    .unlocked_ioctl = st_device_ioctl,
 };
 
 static struct miscdevice st_misc_device = {
@@ -49,8 +70,8 @@ int st_device_init(void)
         return ret;
     }
 
-    pr_info("syscall_throttle: device /dev/%s registrato, minor=%d\n",
-            ST_DEVICE_NAME,
+    pr_info("syscall_throttle: device %s registrato, minor=%d\n",
+            ST_DEVICE_PATH,
             st_misc_device.minor);
 
     return 0;
