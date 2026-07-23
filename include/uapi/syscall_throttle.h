@@ -11,15 +11,23 @@
 #define ST_DEVICE_PATH "/dev/" ST_DEVICE_NAME
 
 /*
- * Identificatore dei comandi ioctl appartenenti al nostro driver.
+ * Lunghezza massima del basename di un eseguibile
+ *
+ * ST_PROGRAM_NAME_MAX non comprende il terminatore
+ */
+#define ST_PROGRAM_NAME_MAX 255U
+#define ST_PROGRAM_NAME_CAPACITY (ST_PROGRAM_NAME_MAX + 1U)
+
+/*
+ * Identificatore dei comandi ioctl appartenenti al driver
  */
 #define ST_IOCTL_MAGIC 'S'
 
 /*
- * Stato del monitor restituito allo user-space.
+ * Stato del monitor restituito allo user-space
  *
  * Non usiamo bool nell'UAPI: __u32 ha una dimensione fissa e rende
- * l'interfaccia binaria più prevedibile.
+ * l'interfaccia binaria più prevedibile
  */
 struct st_monitor_status {
     __u32 enabled;
@@ -27,10 +35,10 @@ struct st_monitor_status {
 };
 
 /*
- * Richiesta relativa a un UID.
+ * Richiesta relativa a un UID
  *
- * uid contiene il valore numerico dell'UID nello user-space.
- * reserved deve essere impostato a zero.
+ * uid contiene il valore numerico dell'UID nello user-space
+ * reserved deve essere impostato a zero
  */
 struct st_uid_request {
     __u32 uid;
@@ -38,7 +46,7 @@ struct st_uid_request {
 };
 
 /*
- * Numero di UID attualmente presenti nel registro.
+ * Numero di UID attualmente presenti nel registro
  */
 struct st_uid_count {
     __u32 count;
@@ -49,12 +57,60 @@ struct st_uid_count {
  * Richiesta per ottenere l'elenco degli UID registrati.
  *
  * uids_ptr contiene l'indirizzo user-space di un array di __u32.
+ *
  * capacity indica quanti elementi può contenere l'array.
+ *
  * count viene scritto dal kernel con il numero di UID registrati.
+ *
  * reserved deve essere inizializzato a zero.
  */
 struct st_uid_list_request {
     __aligned_u64 uids_ptr;
+    __u32 capacity;
+    __u32 count;
+    __u32 reserved[2];
+};
+
+/*
+ * Richiesta relativa al nome di un programma.
+ *
+ * name contiene esclusivamente il basename dell'eseguibile,
+ * terminato da NUL e senza caratteri '/'.
+ *
+ * reserved deve essere inizializzato a zero.
+ */
+struct st_program_request {
+    char name[ST_PROGRAM_NAME_CAPACITY];
+    __u32 reserved[2];
+};
+
+/*
+ * Numero di programmi attualmente presenti nel registro.
+ *
+ * reserved viene inizializzato a zero dal kernel.
+ */
+struct st_program_count {
+    __u32 count;
+    __u32 reserved;
+};
+
+/*
+ * Singolo elemento restituito da PROGRAM_LIST.
+ */
+struct st_program_name {
+    char name[ST_PROGRAM_NAME_CAPACITY];
+};
+
+/*
+ * Richiesta per ottenere uno snapshot dei programmi registrati.
+ *
+ * programs_ptr indica un array user-space di struct st_program_name.
+ * capacity è il numero di elementi disponibili nell'array.
+ * count viene aggiornato con il numero di programmi richiesti
+ * oppure effettivamente restituiti.
+ */
+struct st_program_list_request {
+    __aligned_u64 programs_ptr;
     __u32 capacity;
     __u32 count;
     __u32 reserved[2];
@@ -113,5 +169,22 @@ struct st_uid_list_request {
  */
 #define ST_IOCTL_UID_LIST \
     _IOWR(ST_IOCTL_MAGIC, 0x13, struct st_uid_list_request)
+
+/*
+ * Gestione del registro dei nomi degli eseguibili.
+ *
+ * La struttura viene trasferita dallo user-space verso il kernel.
+ */
+#define ST_IOCTL_PROGRAM_ADD \
+    _IOW(ST_IOCTL_MAGIC, 0x20, struct st_program_request)
+
+#define ST_IOCTL_PROGRAM_REMOVE \
+    _IOW(ST_IOCTL_MAGIC, 0x21, struct st_program_request)
+
+#define ST_IOCTL_PROGRAM_GET_COUNT \
+    _IOR(ST_IOCTL_MAGIC, 0x22, struct st_program_count)
+
+#define ST_IOCTL_PROGRAM_LIST \
+    _IOWR(ST_IOCTL_MAGIC, 0x23, struct st_program_list_request)
 
 #endif

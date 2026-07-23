@@ -14,6 +14,7 @@
 
 #include "device.h"
 #include "monitor_state.h"
+#include "program_registry.h"
 #include "uid_registry.h"
 
 static int st_device_open(struct inode *inode, struct file *file)
@@ -338,6 +339,300 @@ static long st_ioctl_uid_list(unsigned long argument)
     return 0;
 }
 
+
+static long st_ioctl_program_add(unsigned long argument)
+{
+    struct st_program_request request;
+    int ret;
+
+    /*
+     * Copiamo l'intera struttura in memoria kernel.
+     * Non dereferenziamo direttamente il puntatore user-space.
+     */
+    if (copy_from_user(&request,
+                       (const void __user *)argument,
+                       sizeof(request)) != 0) {
+        pr_warn("syscall_throttle: PROGRAM_ADD fallito per pid=%d: "
+                "richiesta user non valida\n",
+                current->pid);
+        return -EFAULT;
+    }
+
+    if (request.reserved[0] != 0U ||
+        request.reserved[1] != 0U) {
+        pr_warn("syscall_throttle: PROGRAM_ADD rifiutato: "
+                "campi reserved non nulli\n");
+        return -EINVAL;
+    }
+
+    /*
+     * Il registro valida:
+     * - nome non vuoto;
+     * - terminazione NUL entro la capacità;
+     * - assenza del carattere '/';
+     * - assenza di duplicati.
+     */
+    ret = st_program_registry_add(request.name);
+
+    if (ret == 0) {
+        pr_info("syscall_throttle: programma '%s' registrato\n",
+                request.name);
+    } else if (ret == -EEXIST) {
+        pr_warn("syscall_throttle: programma '%s' già registrato\n",
+                request.name);
+    } else if (ret == -EINVAL) {
+        /*
+         * Non stampiamo request.name: in caso di mancata
+         * terminazione NUL, usarlo con %%s non sarebbe sicuro.
+         */
+        pr_warn("syscall_throttle: PROGRAM_ADD rifiutato: "
+                "nome non valido\n");
+    } else if (ret == -ENOMEM) {
+        pr_err("syscall_throttle: memoria insufficiente durante "
+               "la registrazione di un programma\n");
+    }
+
+    return ret;
+}
+
+
+static long st_ioctl_program_remove(unsigned long argument)
+{
+    struct st_program_request request;
+    int ret;
+
+    /*
+     * La richiesta viene prima copiata interamente in memoria
+     * kernel. Il puntatore user-space non viene dereferenziato
+     * direttamente.
+     */
+    if (copy_from_user(&request,
+                       (const void __user *)argument,
+                       sizeof(request)) != 0) {
+        pr_warn("syscall_throttle: PROGRAM_REMOVE fallito per pid=%d: "
+                "richiesta user non valida\n",
+                current->pid);
+        return -EFAULT;
+    }
+
+    if (request.reserved[0] != 0U ||
+        request.reserved[1] != 0U) {
+        pr_warn("syscall_throttle: PROGRAM_REMOVE rifiutato: "
+                "campi reserved non nulli\n");
+        return -EINVAL;
+    }
+
+    ret = st_program_registry_remove(request.name);
+
+    if (ret == 0) {
+        pr_info("syscall_throttle: programma '%s' rimosso\n",
+                request.name);
+    } else if (ret == -ENOENT) {
+        /*
+         * -ENOENT implica che il nome è stato validato dal
+         * registro, quindi è sicuro stamparlo con %s.
+         */
+        pr_warn("syscall_throttle: programma '%s' non registrato\n",
+                request.name);
+    } else if (ret == -EINVAL) {
+        /*
+         * Un nome non terminato da NUL non deve essere stampato
+         * direttamente come stringa.
+         */
+        pr_warn("syscall_throttle: PROGRAM_REMOVE rifiutato: "
+                "nome non valido\n");
+    }
+
+    return ret;
+}
+
+
+static long st_ioctl_program_get_count(unsigned long argument)
+{
+    struct st_program_count response = {
+        .count = st_program_registry_count(),
+        .reserved = 0U,
+    };
+
+    /*
+     * Il conteggio viene prodotto dal kernel e copiato nella
+     * struttura indicata dallo user-space.
+     */
+    if (copy_to_user((void __user *)argument,
+                     &response,
+                     sizeof(response)) != 0) {
+        pr_warn("syscall_throttle: PROGRAM_GET_COUNT fallito "
+                "per pid=%d: destinazione user non valida\n",
+                current->pid);
+        return -EFAULT;
+    }
+
+    pr_info("syscall_throttle: PROGRAM_GET_COUNT da pid=%d: "
+            "%u programmi registrati\n",
+            current->pid,
+            response.count);
+
+    return 0;
+}
+
+
+static long st_ioctl_program_list(unsigned long argument)
+{
+    struct st_program_list_request request;
+    struct st_program_name *programs = NULL;
+    __u32 required;
+    __u32 actual = 0U;
+    size_t bytes;
+    int ret;
+
+    /*
+     * Copiamo prima la descrizione del buffer user-space in una
+     * struttura locale kernel.
+     */
+    if (copy_from_user(&request,
+                       (const void __user *)argument,
+                       sizeof(request)) != 0) {
+        pr_warn("syscall_throttle: PROGRAM_LIST fallito per pid=%d: "
+                "richiesta user non valida\n",
+                current->pid);
+        return -EFAULT;
+    }
+
+    if (request.reserved[0] != 0U ||
+        request.reserved[1] != 0U) {
+        pr_warn("syscall_throttle: PROGRAM_LIST rifiutato: "
+                "campi reserved non nulli\n");
+        return -EINVAL;
+    }
+
+    /*
+     * Una capacità positiva richiede un puntatore user-space
+     * non nullo.
+     */
+    if (request.capacity != 0U &&
+        request.programs_ptr == 0U) {
+        pr_warn("syscall_throttle: PROGRAM_LIST rifiutato: "
+                "puntatore nullo con capacità positiva\n");
+        return -EINVAL;
+    }
+
+    /*
+     * La dimensione dell'allocazione viene ricavata dal registro
+     * kernel e non dalla capacità dichiarata dallo user-space.
+     */
+    required = (__u32)st_program_registry_count();
+    request.count = required;
+
+    /*
+     * Se il buffer dichiarato è troppo piccolo, restituiamo la
+     * dimensione necessaria senza produrre una lista parziale.
+     */
+    if (request.capacity < required) {
+        if (copy_to_user((void __user *)argument,
+                         &request,
+                         sizeof(request)) != 0) {
+            return -EFAULT;
+        }
+
+        return -ENOSPC;
+    }
+
+    /*
+     * Registro vuoto: non occorre allocare né copiare un array.
+     */
+    if (required == 0U) {
+        if (copy_to_user((void __user *)argument,
+                         &request,
+                         sizeof(request)) != 0) {
+            return -EFAULT;
+        }
+
+        pr_info("syscall_throttle: PROGRAM_LIST da pid=%d: "
+                "0 programmi restituiti\n",
+                current->pid);
+        return 0;
+    }
+
+    programs = kcalloc(required,
+                       sizeof(*programs),
+                       GFP_KERNEL);
+    if (programs == NULL)
+        return -ENOMEM;
+
+    /*
+     * Il registro potrebbe cambiare tra la lettura del conteggio
+     * e l'acquisizione del mutex nello snapshot.
+     */
+    ret = st_program_registry_snapshot(programs,
+                                       required,
+                                       &actual);
+
+    if (ret == -ENOSPC) {
+        /*
+         * Il registro è cresciuto: comunichiamo la nuova
+         * dimensione necessaria allo user-space.
+         */
+        request.count = actual;
+
+        if (copy_to_user((void __user *)argument,
+                         &request,
+                         sizeof(request)) != 0) {
+            kfree(programs);
+            return -EFAULT;
+        }
+
+        kfree(programs);
+        return -ENOSPC;
+    }
+
+    if (ret != 0) {
+        pr_err("syscall_throttle: impossibile creare lo snapshot "
+               "dei programmi: errore=%d\n",
+               ret);
+        kfree(programs);
+        return ret;
+    }
+
+    request.count = actual;
+    bytes = (size_t)actual * sizeof(*programs);
+
+    /*
+     * Lo snapshot ha già rilasciato il mutex. La copia verso lo
+     * user-space non blocca quindi il registro.
+     */
+    if (actual != 0U &&
+        copy_to_user(u64_to_user_ptr(request.programs_ptr),
+                     programs,
+                     bytes) != 0) {
+        pr_warn("syscall_throttle: PROGRAM_LIST fallito per pid=%d: "
+                "array user non valido\n",
+                current->pid);
+        kfree(programs);
+        return -EFAULT;
+    }
+
+    kfree(programs);
+
+    /*
+     * Restituiamo anche la struttura aggiornata, in particolare
+     * il numero effettivo di elementi copiati.
+     */
+    if (copy_to_user((void __user *)argument,
+                     &request,
+                     sizeof(request)) != 0) {
+        return -EFAULT;
+    }
+
+    pr_info("syscall_throttle: PROGRAM_LIST da pid=%d: "
+            "%u programmi restituiti\n",
+            current->pid,
+            actual);
+
+    return 0;
+}
+
+
+
 static long st_device_ioctl(struct file *file,
                             unsigned int command,
                             unsigned long argument)
@@ -403,6 +698,34 @@ static long st_device_ioctl(struct file *file,
 
     case ST_IOCTL_UID_LIST:
         return st_ioctl_uid_list(argument);
+
+    case ST_IOCTL_PROGRAM_ADD:
+        if (!st_caller_is_root()) {
+            pr_warn("syscall_throttle: PROGRAM_ADD rifiutato: "
+                    "pid=%d euid=%u\n",
+                    current->pid,
+                    __kuid_val(current_euid()));
+            return -EPERM;
+        }
+
+        return st_ioctl_program_add(argument);
+
+    case ST_IOCTL_PROGRAM_REMOVE:
+        if (!st_caller_is_root()) {
+            pr_warn("syscall_throttle: PROGRAM_REMOVE rifiutato: "
+                    "pid=%d euid=%u\n",
+                    current->pid,
+                    __kuid_val(current_euid()));
+            return -EPERM;
+        }
+
+        return st_ioctl_program_remove(argument);
+
+    case ST_IOCTL_PROGRAM_GET_COUNT:
+        return st_ioctl_program_get_count(argument);
+
+    case ST_IOCTL_PROGRAM_LIST:
+        return st_ioctl_program_list(argument);
 
     default:
         return -ENOTTY;

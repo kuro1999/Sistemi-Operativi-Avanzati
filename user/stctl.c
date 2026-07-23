@@ -20,7 +20,15 @@ static void print_usage(const char *program_name)
             "  %s uid-add <UID>\n"
             "  %s uid-remove <UID>\n"
             "  %s uid-count\n"
-            "  %s uid-list\n",
+            "  %s uid-list\n"
+            "  %s program-add <nome>\n"
+            "  %s program-remove <nome>\n"
+            "  %s program-count\n"
+            "  %s program-list\n",
+            program_name,
+            program_name,
+            program_name,
+            program_name,
             program_name,
             program_name,
             program_name,
@@ -326,6 +334,260 @@ static int execute_uid_list(int fd)
     return 1;
 }
 
+
+static int validate_program_name(const char *name)
+{
+    size_t length;
+
+    if (name == NULL || name[0] == '\0')
+        return -1;
+
+    /*
+     * argv contiene già una stringa terminata da NUL, quindi
+     * strlen() è sicura in questo contesto user-space.
+     */
+    length = strlen(name);
+
+    if (length > ST_PROGRAM_NAME_MAX)
+        return -1;
+
+    /*
+     * Accettiamo esclusivamente il basename, non un percorso.
+     */
+    if (strchr(name, '/') != NULL)
+        return -1;
+
+    return 0;
+}
+
+static int execute_program_add(int fd, const char *name)
+{
+    struct st_program_request request = {0};
+
+    /*
+     * validate_program_name() garantisce che il nome e il
+     * terminatore NUL entrino nell'array della richiesta.
+     */
+    memcpy(request.name, name, strlen(name) + 1U);
+
+    if (ioctl(fd, ST_IOCTL_PROGRAM_ADD, &request) == -1) {
+        if (errno == EEXIST) {
+            fprintf(stderr,
+                    "Programma '%s' già registrato.\n",
+                    name);
+        } else if (errno == EPERM) {
+            fprintf(stderr,
+                    "Registrazione programma non consentita: "
+                    "sono richiesti privilegi root.\n");
+        } else if (errno == EINVAL) {
+            fprintf(stderr,
+                    "Nome programma non valido: %s\n",
+                    name);
+        } else {
+            fprintf(stderr,
+                    "ioctl ST_IOCTL_PROGRAM_ADD fallita: %s\n",
+                    strerror(errno));
+        }
+
+        return 1;
+    }
+
+    printf("Programma '%s' registrato.\n", name);
+    return 0;
+}
+
+
+static int execute_program_remove(int fd, const char *name)
+{
+    struct st_program_request request = {0};
+
+    memcpy(request.name, name, strlen(name) + 1U);
+
+    if (ioctl(fd, ST_IOCTL_PROGRAM_REMOVE, &request) == -1) {
+        if (errno == ENOENT) {
+            fprintf(stderr,
+                    "Programma '%s' non registrato.\n",
+                    name);
+        } else if (errno == EPERM) {
+            fprintf(stderr,
+                    "Rimozione programma non consentita: "
+                    "sono richiesti privilegi root.\n");
+        } else if (errno == EINVAL) {
+            fprintf(stderr,
+                    "Nome programma non valido: %s\n",
+                    name);
+        } else {
+            fprintf(stderr,
+                    "ioctl ST_IOCTL_PROGRAM_REMOVE fallita: %s\n",
+                    strerror(errno));
+        }
+
+        return 1;
+    }
+
+    printf("Programma '%s' rimosso.\n", name);
+    return 0;
+}
+
+
+static int execute_program_count(int fd)
+{
+    struct st_program_count response = {0};
+
+    if (ioctl(fd, ST_IOCTL_PROGRAM_GET_COUNT, &response) == -1) {
+        fprintf(stderr,
+                "ioctl ST_IOCTL_PROGRAM_GET_COUNT fallita: %s\n",
+                strerror(errno));
+        return 1;
+    }
+
+    if (response.reserved != 0U) {
+        fprintf(stderr,
+                "Risposta PROGRAM_GET_COUNT non valida.\n");
+        return 1;
+    }
+
+    printf("Programmi registrati: %u\n", response.count);
+    return 0;
+}
+
+
+static int execute_program_list(int fd)
+{
+    struct st_program_count count_response = {0};
+    struct st_program_list_request request;
+    struct st_program_name *programs = NULL;
+    __u32 capacity;
+    __u32 index;
+    unsigned int attempt;
+
+    /*
+     * Prima richiesta: determina il numero iniziale di elementi
+     * da allocare nello user-space.
+     */
+    if (ioctl(fd,
+              ST_IOCTL_PROGRAM_GET_COUNT,
+              &count_response) == -1) {
+        fprintf(stderr,
+                "ioctl ST_IOCTL_PROGRAM_GET_COUNT fallita: %s\n",
+                strerror(errno));
+        return 1;
+    }
+
+    if (count_response.reserved != 0U) {
+        fprintf(stderr,
+                "Risposta PROGRAM_GET_COUNT non valida.\n");
+        return 1;
+    }
+
+    capacity = count_response.count;
+
+    if (capacity == 0U) {
+        printf("Programmi registrati: 0\n");
+        printf("  nessuno\n");
+        return 0;
+    }
+
+    /*
+     * Il numero di elementi può cambiare tra GET_COUNT e LIST.
+     * Sono consentiti al massimo quattro tentativi.
+     */
+    for (attempt = 0U; attempt < 4U; attempt++) {
+        programs = calloc(capacity, sizeof(*programs));
+        if (programs == NULL) {
+            fprintf(stderr,
+                    "Memoria insufficiente per la lista "
+                    "dei programmi.\n");
+            return 1;
+        }
+
+        memset(&request, 0, sizeof(request));
+
+        request.programs_ptr =
+            (__u64)(uintptr_t)programs;
+        request.capacity = capacity;
+
+        if (ioctl(fd,
+                  ST_IOCTL_PROGRAM_LIST,
+                  &request) == 0) {
+            /*
+             * Il kernel non può dichiarare di aver scritto più
+             * elementi della capacità fornita.
+             */
+            if (request.count > capacity) {
+                fprintf(stderr,
+                        "Risposta PROGRAM_LIST non valida: "
+                        "conteggio superiore alla capacità.\n");
+                free(programs);
+                return 1;
+            }
+
+            printf("Programmi registrati: %u\n",
+                   request.count);
+
+            if (request.count == 0U) {
+                printf("  nessuno\n");
+                free(programs);
+                return 0;
+            }
+
+            for (index = 0U;
+                 index < request.count;
+                 index++) {
+                /*
+                 * Validazione difensiva: ogni nome restituito
+                 * dal kernel deve contenere un terminatore NUL
+                 * entro il record a dimensione fissa.
+                 */
+                if (memchr(programs[index].name,
+                           '\0',
+                           sizeof(programs[index].name)) == NULL) {
+                    fprintf(stderr,
+                            "Risposta PROGRAM_LIST non valida: "
+                            "nome non terminato.\n");
+                    free(programs);
+                    return 1;
+                }
+
+                printf("  %s\n", programs[index].name);
+            }
+
+            free(programs);
+            return 0;
+        }
+
+        if (errno != ENOSPC) {
+            fprintf(stderr,
+                    "ioctl ST_IOCTL_PROGRAM_LIST fallita: %s\n",
+                    strerror(errno));
+            free(programs);
+            return 1;
+        }
+
+        /*
+         * ENOSPC indica che il registro è cresciuto.
+         * request.count contiene la nuova dimensione richiesta.
+         */
+        if (request.count <= capacity) {
+            fprintf(stderr,
+                    "Risposta PROGRAM_LIST non valida dopo "
+                    "ENOSPC.\n");
+            free(programs);
+            return 1;
+        }
+
+        capacity = request.count;
+        free(programs);
+        programs = NULL;
+    }
+
+    fprintf(stderr,
+            "Il registro programmi è cambiato troppe volte "
+            "durante la consultazione.\n");
+
+    return 1;
+}
+
 static int is_simple_command(const char *command)
 {
     return strcmp(command, "ping") == 0 ||
@@ -333,7 +595,9 @@ static int is_simple_command(const char *command)
            strcmp(command, "enable") == 0 ||
            strcmp(command, "disable") == 0 ||
            strcmp(command, "uid-count") == 0 ||
-           strcmp(command, "uid-list") == 0;
+           strcmp(command, "uid-list") == 0 ||
+           strcmp(command, "program-count") == 0 ||
+           strcmp(command, "program-list") == 0;
 }
 
 static int execute_simple_command(int fd, const char *command)
@@ -353,13 +617,24 @@ static int execute_simple_command(int fd, const char *command)
     if (strcmp(command, "uid-count") == 0)
         return execute_uid_count(fd);
 
-    return execute_uid_list(fd);
+    if (strcmp(command, "uid-list") == 0)
+        return execute_uid_list(fd);
+
+    if (strcmp(command, "program-count") == 0)
+        return execute_program_count(fd);
+
+    if (strcmp(command, "program-list") == 0)
+        return execute_program_list(fd);
+
+    return 1;
 }
 
 int main(int argc, char *argv[])
 {
     __u32 uid = 0U;
+    const char *program_name = NULL;
     int uid_operation = 0;
+    int program_operation = 0;
     int fd;
     int result;
 
@@ -377,6 +652,22 @@ int main(int argc, char *argv[])
             uid_operation = 1;
         else
             uid_operation = 2;
+    } else if (argc == 3 &&
+               (strcmp(argv[1], "program-add") == 0 ||
+                strcmp(argv[1], "program-remove") == 0)) {
+        if (validate_program_name(argv[2]) != 0) {
+            fprintf(stderr,
+                    "Nome programma non valido: %s\n",
+                    argv[2]);
+            return 1;
+        }
+
+        program_name = argv[2];
+
+        if (strcmp(argv[1], "program-add") == 0)
+            program_operation = 1;
+        else
+            program_operation = 2;
     } else {
         print_usage(argv[0]);
         return 1;
@@ -395,6 +686,10 @@ int main(int argc, char *argv[])
         result = execute_uid_add(fd, uid);
     else if (uid_operation == 2)
         result = execute_uid_remove(fd, uid);
+    else if (program_operation == 1)
+        result = execute_program_add(fd, program_name);
+    else if (program_operation == 2)
+        result = execute_program_remove(fd, program_name);
     else
         result = execute_simple_command(fd, argv[1]);
 
