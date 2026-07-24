@@ -15,6 +15,7 @@
 #include "device.h"
 #include "monitor_state.h"
 #include "program_registry.h"
+#include "syscall_registry.h"
 #include "uid_registry.h"
 
 static int st_device_open(struct inode *inode, struct file *file)
@@ -726,6 +727,354 @@ static long st_device_ioctl(struct file *file,
 
     case ST_IOCTL_PROGRAM_LIST:
         return st_ioctl_program_list(argument);
+
+    case ST_IOCTL_SYSCALL_ADD: {
+        struct st_syscall_request request;
+        int ret;
+
+        /*
+         * La configurazione del registro è riservata a un
+         * chiamante con effective UID zero.
+         *
+         * Il controllo viene eseguito prima di accedere al
+         * puntatore user-space fornito attraverso argument.
+         */
+        if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
+            pr_warn("syscall_throttle: SYSCALL_ADD rifiutato: "
+                    "privilegi insufficienti\n");
+            return -EPERM;
+        }
+
+        if (copy_from_user(&request,
+                           (void __user *)argument,
+                           sizeof(request)) != 0) {
+            pr_warn("syscall_throttle: SYSCALL_ADD fallito: "
+                    "richiesta user-space non accessibile\n");
+            return -EFAULT;
+        }
+
+        /*
+         * I campi riservati devono essere inizializzati a zero.
+         * Valori diversi indicano una richiesta non valida o
+         * costruita per una versione differente dell'UAPI.
+         */
+        if (request.reserved != 0U) {
+            pr_warn("syscall_throttle: SYSCALL_ADD fallito: "
+                    "campo reserved non valido\n");
+            return -EINVAL;
+        }
+
+        /*
+         * Il registro esegue la validazione architetturale:
+         *
+         *     number < NR_syscalls
+         *
+         * e serializza gli aggiornamenti della bitmap.
+         */
+        ret = st_syscall_registry_add(request.number);
+
+        if (ret == 0) {
+            pr_info("syscall_throttle: system call %u registrata\n",
+                    request.number);
+            return 0;
+        }
+
+        if (ret == -EEXIST) {
+            pr_warn("syscall_throttle: system call %u "
+                    "già registrata\n",
+                    request.number);
+            return ret;
+        }
+
+        if (ret == -EINVAL) {
+            pr_warn("syscall_throttle: numero di system call "
+                    "%u non valido\n",
+                    request.number);
+            return ret;
+        }
+
+        pr_err("syscall_throttle: impossibile registrare "
+               "la system call %u: errore %d\n",
+               request.number,
+               ret);
+
+        return ret;
+    }
+
+    case ST_IOCTL_SYSCALL_REMOVE: {
+        struct st_syscall_request request;
+        int ret;
+
+        /*
+         * La rimozione modifica la configurazione del monitor
+         * ed è quindi riservata a effective UID zero.
+         */
+        if (!uid_eq(current_euid(), GLOBAL_ROOT_UID)) {
+            pr_warn("syscall_throttle: SYSCALL_REMOVE rifiutato: "
+                    "privilegi insufficienti\n");
+            return -EPERM;
+        }
+
+        if (copy_from_user(&request,
+                           (void __user *)argument,
+                           sizeof(request)) != 0) {
+            pr_warn("syscall_throttle: SYSCALL_REMOVE fallito: "
+                    "richiesta user-space non accessibile\n");
+            return -EFAULT;
+        }
+
+        /*
+         * Un campo reserved diverso da zero indica una richiesta
+         * non valida o non compatibile con l'UAPI corrente.
+         */
+        if (request.reserved != 0U) {
+            pr_warn("syscall_throttle: SYSCALL_REMOVE fallito: "
+                    "campo reserved non valido\n");
+            return -EINVAL;
+        }
+
+        ret = st_syscall_registry_remove(request.number);
+
+        if (ret == 0) {
+            pr_info("syscall_throttle: system call %u rimossa\n",
+                    request.number);
+            return 0;
+        }
+
+        if (ret == -ENOENT) {
+            pr_warn("syscall_throttle: impossibile rimuovere "
+                    "la system call %u: non registrata\n",
+                    request.number);
+            return ret;
+        }
+
+        if (ret == -EINVAL) {
+            pr_warn("syscall_throttle: numero di system call "
+                    "%u non valido\n",
+                    request.number);
+            return ret;
+        }
+
+        pr_err("syscall_throttle: impossibile rimuovere "
+               "la system call %u: errore %d\n",
+               request.number,
+               ret);
+
+        return ret;
+    }
+
+    case ST_IOCTL_SYSCALL_GET_COUNT: {
+        struct st_syscall_count response = {
+            .count = st_syscall_registry_count(),
+            .reserved = 0U,
+        };
+
+        /*
+         * Il conteggio è un'operazione di sola lettura e non
+         * richiede privilegi amministrativi.
+         *
+         * La struttura locale viene inizializzata completamente
+         * prima della copia verso lo user-space.
+         */
+        if (copy_to_user((void __user *)argument,
+                         &response,
+                         sizeof(response)) != 0) {
+            pr_warn("syscall_throttle: SYSCALL_GET_COUNT fallito: "
+                    "risposta user-space non accessibile\n");
+            return -EFAULT;
+        }
+
+        pr_info("syscall_throttle: SYSCALL_GET_COUNT da pid=%d: "
+                "%u system call registrate\n",
+                current->pid,
+                response.count);
+
+        return 0;
+    }
+
+    case ST_IOCTL_SYSCALL_LIST: {
+        struct st_syscall_list_request request;
+        __u32 *numbers = NULL;
+        __u32 required;
+        __u32 actual = 0U;
+        int ret;
+
+        if (copy_from_user(&request,
+                           (void __user *)argument,
+                           sizeof(request)) != 0) {
+            pr_warn("syscall_throttle: SYSCALL_LIST fallito: "
+                    "richiesta user-space non accessibile\n");
+            return -EFAULT;
+        }
+
+        /*
+         * I campi riservati devono essere zero per garantire
+         * che la richiesta sia compatibile con l'UAPI corrente.
+         */
+        if (request.reserved[0] != 0U ||
+            request.reserved[1] != 0U) {
+            pr_warn("syscall_throttle: SYSCALL_LIST fallito: "
+                    "campi reserved non validi\n");
+            return -EINVAL;
+        }
+
+        /*
+         * Se lo user-space dichiara una capacità positiva deve
+         * fornire anche l'indirizzo dell'array di destinazione.
+         *
+         * capacity == 0 e numbers_ptr == 0 è invece una richiesta
+         * valida: il driver potrà comunicare la dimensione
+         * necessaria tramite request.count e -ENOSPC.
+         */
+        if (request.capacity > 0U &&
+            request.numbers_ptr == 0U) {
+            pr_warn("syscall_throttle: SYSCALL_LIST fallito: "
+                    "puntatore array nullo con capacità positiva\n");
+            return -EINVAL;
+        }
+
+        /*
+         * required deriva dallo stato reale del registro.
+         * Non usiamo request.capacity per dimensionare
+         * un'allocazione kernel.
+         */
+        required = (__u32)st_syscall_registry_count();
+        request.count = required;
+
+        /*
+         * Non restituiamo una lista parziale. Comunichiamo allo
+         * user-space la capacità necessaria e chiediamo di
+         * ripetere l'operazione.
+         */
+        if (request.capacity < required) {
+            if (copy_to_user((void __user *)argument,
+                             &request,
+                             sizeof(request)) != 0) {
+                pr_warn("syscall_throttle: SYSCALL_LIST fallito: "
+                        "impossibile restituire la capacità "
+                        "necessaria\n");
+                return -EFAULT;
+            }
+
+            pr_info("syscall_throttle: SYSCALL_LIST richiede "
+                    "capacità=%u, ricevuta=%u\n",
+                    required,
+                    request.capacity);
+
+            return -ENOSPC;
+        }
+
+        /*
+         * Registro vuoto: non occorre allocare o copiare
+         * alcun array. Restituiamo soltanto count == 0.
+         */
+        if (required == 0U) {
+            if (copy_to_user((void __user *)argument,
+                             &request,
+                             sizeof(request)) != 0) {
+                pr_warn("syscall_throttle: SYSCALL_LIST fallito: "
+                        "risposta user-space non accessibile\n");
+                return -EFAULT;
+            }
+
+            pr_info("syscall_throttle: SYSCALL_LIST da pid=%d: "
+                    "registro vuoto\n",
+                    current->pid);
+
+            return 0;
+        }
+
+        /*
+         * L'allocazione è limitata dal numero reale di bit
+         * attualmente impostati nella bitmap.
+         */
+        numbers = kcalloc(required,
+                          sizeof(*numbers),
+                          GFP_KERNEL);
+        if (numbers == NULL) {
+            pr_err("syscall_throttle: SYSCALL_LIST fallito: "
+                   "memoria kernel insufficiente\n");
+            return -ENOMEM;
+        }
+
+        /*
+         * Passiamo required come capacità perché rappresenta
+         * la dimensione reale del buffer kernel appena allocato.
+         *
+         * Se il registro cresce tra count() e snapshot(),
+         * snapshot() restituisce -ENOSPC e comunica la nuova
+         * dimensione tramite actual.
+         */
+        ret = st_syscall_registry_snapshot(numbers,
+                                           required,
+                                           &actual);
+        request.count = actual;
+
+        if (ret == -ENOSPC) {
+            kfree(numbers);
+
+            if (copy_to_user((void __user *)argument,
+                             &request,
+                             sizeof(request)) != 0) {
+                pr_warn("syscall_throttle: SYSCALL_LIST fallito: "
+                        "impossibile restituire la nuova capacità\n");
+                return -EFAULT;
+            }
+
+            pr_info("syscall_throttle: SYSCALL_LIST da ripetere: "
+                    "registro cresciuto, capacità necessaria=%u\n",
+                    actual);
+
+            return -ENOSPC;
+        }
+
+        if (ret != 0) {
+            kfree(numbers);
+
+            pr_err("syscall_throttle: SYSCALL_LIST fallito durante "
+                   "lo snapshot: errore %d\n",
+                   ret);
+
+            return ret;
+        }
+
+        /*
+         * Il registro potrebbe essersi ridotto prima dello
+         * snapshot. In tal caso actual può essere minore di
+         * required e copiamo soltanto gli elementi effettivi.
+         */
+        if (actual > 0U &&
+            copy_to_user(u64_to_user_ptr(request.numbers_ptr),
+                         numbers,
+                         actual * sizeof(*numbers)) != 0) {
+            kfree(numbers);
+
+            pr_warn("syscall_throttle: SYSCALL_LIST fallito: "
+                    "array user-space non accessibile\n");
+            return -EFAULT;
+        }
+
+        kfree(numbers);
+
+        /*
+         * Copiamo la struttura dopo l'array, così count descrive
+         * gli elementi effettivamente trasferiti.
+         */
+        if (copy_to_user((void __user *)argument,
+                         &request,
+                         sizeof(request)) != 0) {
+            pr_warn("syscall_throttle: SYSCALL_LIST fallito: "
+                    "metadati user-space non accessibili\n");
+            return -EFAULT;
+        }
+
+        pr_info("syscall_throttle: SYSCALL_LIST da pid=%d: "
+                "%u system call restituite\n",
+                current->pid,
+                actual);
+
+        return 0;
+    }
 
     default:
         return -ENOTTY;

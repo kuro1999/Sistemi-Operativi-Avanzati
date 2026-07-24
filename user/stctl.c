@@ -24,7 +24,15 @@ static void print_usage(const char *program_name)
             "  %s program-add <nome>\n"
             "  %s program-remove <nome>\n"
             "  %s program-count\n"
-            "  %s program-list\n",
+            "  %s program-list\n"
+            "  %s syscall-add <numero>\n"
+            "  %s syscall-remove <numero>\n"
+            "  %s syscall-count\n"
+            "  %s syscall-list\n",
+            program_name,
+            program_name,
+            program_name,
+            program_name,
             program_name,
             program_name,
             program_name,
@@ -335,6 +343,51 @@ static int execute_uid_list(int fd)
 }
 
 
+static int parse_syscall_number(const char *text, __u32 *number)
+{
+    const char *cursor;
+    char *end;
+    unsigned long long value;
+
+    if (text == NULL || number == NULL || text[0] == '\0')
+        return -1;
+
+    /*
+     * Accettiamo esclusivamente cifre decimali.
+     *
+     * Vengono quindi rifiutati:
+     *
+     *     numeri negativi
+     *     segno positivo
+     *     spazi
+     *     suffissi
+     *     notazioni non decimali
+     */
+    for (cursor = text; *cursor != '\0'; cursor++) {
+        if (*cursor < '0' || *cursor > '9')
+            return -1;
+    }
+
+    errno = 0;
+    end = NULL;
+    value = strtoull(text, &end, 10);
+
+    if (errno == ERANGE ||
+        end == text ||
+        *end != '\0' ||
+        value > UINT32_MAX) {
+        return -1;
+    }
+
+    /*
+     * Il limite architetturale NR_syscalls viene controllato
+     * dal kernel, perché dipende dal kernel in esecuzione.
+     */
+    *number = (__u32)value;
+
+    return 0;
+}
+
 static int validate_program_name(const char *name)
 {
     size_t length;
@@ -588,6 +641,211 @@ static int execute_program_list(int fd)
     return 1;
 }
 
+static int execute_syscall_count(int fd)
+{
+    struct st_syscall_count response = {
+        .count = 0U,
+        .reserved = 0U,
+    };
+
+    if (ioctl(fd,
+              ST_IOCTL_SYSCALL_GET_COUNT,
+              &response) == -1) {
+        fprintf(stderr,
+                "ioctl ST_IOCTL_SYSCALL_GET_COUNT fallita: %s\n",
+                strerror(errno));
+        return 1;
+    }
+
+    /*
+     * Il kernel corrente restituisce reserved sempre a zero.
+     * Un valore diverso indicherebbe una risposta incompatibile
+     * o non conforme alla versione corrente dell'UAPI.
+     */
+    if (response.reserved != 0U) {
+        fprintf(stderr,
+                "Risposta SYSCALL_GET_COUNT non valida.\n");
+        return 1;
+    }
+
+    printf("System call registrate: %u\n",
+           (unsigned int)response.count);
+
+    return 0;
+}
+
+static int execute_syscall_list(int fd)
+{
+    struct st_syscall_count count_response = {
+        .count = 0U,
+        .reserved = 0U,
+    };
+    __u32 capacity;
+    unsigned int attempt;
+
+    /*
+     * Il primo conteggio serve soltanto a ottenere una capacità
+     * iniziale. Il registro può cambiare prima di SYSCALL_LIST,
+     * quindi il risultato non viene considerato definitivo.
+     */
+    if (ioctl(fd,
+              ST_IOCTL_SYSCALL_GET_COUNT,
+              &count_response) == -1) {
+        fprintf(stderr,
+                "ioctl ST_IOCTL_SYSCALL_GET_COUNT fallita: %s\n",
+                strerror(errno));
+        return 1;
+    }
+
+    if (count_response.reserved != 0U) {
+        fprintf(stderr,
+                "Risposta SYSCALL_GET_COUNT non valida.\n");
+        return 1;
+    }
+
+    capacity = count_response.count;
+
+    /*
+     * Un numero limitato di tentativi evita un ciclo infinito
+     * nel caso in cui il registro continui a crescere durante
+     * la consultazione.
+     */
+    for (attempt = 0U; attempt < 4U; attempt++) {
+        struct st_syscall_list_request request = {0};
+        __u32 *numbers = NULL;
+        __u32 index;
+        int saved_errno;
+
+        if (capacity > 0U) {
+            /*
+             * capacity proviene dal registro kernel, che può
+             * contenere al massimo NR_syscalls elementi.
+             *
+             * calloc() restituisce NULL se l'allocazione non
+             * può essere soddisfatta.
+             */
+            numbers = calloc((size_t)capacity,
+                             sizeof(*numbers));
+            if (numbers == NULL) {
+                fprintf(stderr,
+                        "Memoria insufficiente per la lista "
+                        "delle system call.\n");
+                return 1;
+            }
+        }
+
+        request.numbers_ptr =
+            (__u64)(uintptr_t)numbers;
+        request.capacity = capacity;
+        request.count = 0U;
+        request.reserved[0] = 0U;
+        request.reserved[1] = 0U;
+
+        if (ioctl(fd,
+                  ST_IOCTL_SYSCALL_LIST,
+                  &request) == 0) {
+            if (request.reserved[0] != 0U ||
+                request.reserved[1] != 0U) {
+                fprintf(stderr,
+                        "Risposta SYSCALL_LIST non valida: "
+                        "campi reserved modificati.\n");
+                free(numbers);
+                return 1;
+            }
+
+            if (request.count > capacity) {
+                fprintf(stderr,
+                        "Risposta SYSCALL_LIST non valida: "
+                        "count supera la capacità.\n");
+                free(numbers);
+                return 1;
+            }
+
+            if (request.count > 0U && numbers == NULL) {
+                fprintf(stderr,
+                        "Risposta SYSCALL_LIST non valida: "
+                        "array assente.\n");
+                return 1;
+            }
+
+            /*
+             * Il kernel deve restituire i numeri in ordine
+             * strettamente crescente, poiché attraversa la
+             * bitmap con for_each_set_bit().
+             */
+            for (index = 1U;
+                 index < request.count;
+                 index++) {
+                if (numbers[index] <= numbers[index - 1U]) {
+                    fprintf(stderr,
+                            "Risposta SYSCALL_LIST non valida: "
+                            "ordine dei numeri incoerente.\n");
+                    free(numbers);
+                    return 1;
+                }
+            }
+
+            printf("System call registrate: %u\n",
+                   (unsigned int)request.count);
+
+            if (request.count == 0U) {
+                printf("  nessuna\n");
+            } else {
+                for (index = 0U;
+                     index < request.count;
+                     index++) {
+                    printf("  %u\n",
+                           (unsigned int)numbers[index]);
+                }
+            }
+
+            free(numbers);
+            return 0;
+        }
+
+        saved_errno = errno;
+
+        if (request.reserved[0] != 0U ||
+            request.reserved[1] != 0U) {
+            fprintf(stderr,
+                    "Risposta SYSCALL_LIST non valida: "
+                    "campi reserved modificati.\n");
+            free(numbers);
+            return 1;
+        }
+
+        if (saved_errno != ENOSPC) {
+            fprintf(stderr,
+                    "ioctl ST_IOCTL_SYSCALL_LIST fallita: %s\n",
+                    strerror(saved_errno));
+            free(numbers);
+            return 1;
+        }
+
+        /*
+         * In caso di ENOSPC, il kernel deve comunicare una
+         * capacità strettamente maggiore di quella utilizzata.
+         * Altrimenti un nuovo tentativo non potrebbe progredire.
+         */
+        if (request.count <= capacity) {
+            fprintf(stderr,
+                    "Risposta SYSCALL_LIST non valida: "
+                    "capacità richiesta non crescente.\n");
+            free(numbers);
+            return 1;
+        }
+
+        free(numbers);
+        capacity = request.count;
+    }
+
+    fprintf(stderr,
+            "Impossibile ottenere una lista stabile delle "
+            "system call dopo più tentativi.\n");
+
+    return 1;
+}
+
 static int is_simple_command(const char *command)
 {
     return strcmp(command, "ping") == 0 ||
@@ -597,7 +855,9 @@ static int is_simple_command(const char *command)
            strcmp(command, "uid-count") == 0 ||
            strcmp(command, "uid-list") == 0 ||
            strcmp(command, "program-count") == 0 ||
-           strcmp(command, "program-list") == 0;
+           strcmp(command, "program-list") == 0 ||
+           strcmp(command, "syscall-count") == 0 ||
+           strcmp(command, "syscall-list") == 0;
 }
 
 static int execute_simple_command(int fd, const char *command)
@@ -626,15 +886,121 @@ static int execute_simple_command(int fd, const char *command)
     if (strcmp(command, "program-list") == 0)
         return execute_program_list(fd);
 
+    if (strcmp(command, "syscall-count") == 0)
+        return execute_syscall_count(fd);
+
+    if (strcmp(command, "syscall-list") == 0)
+        return execute_syscall_list(fd);
+
     return 1;
+}
+
+static int execute_syscall_add(int fd, __u32 number)
+{
+    struct st_syscall_request request = {
+        .number = number,
+        .reserved = 0U,
+    };
+
+    if (ioctl(fd, ST_IOCTL_SYSCALL_ADD, &request) == -1) {
+        switch (errno) {
+        case EPERM:
+            fprintf(stderr,
+                    "Registrazione system call non consentita: "
+                    "sono richiesti privilegi root.\n");
+            break;
+
+        case EEXIST:
+            fprintf(stderr,
+                    "System call %u già registrata.\n",
+                    number);
+            break;
+
+        case EINVAL:
+            fprintf(stderr,
+                    "Numero di system call non valido per "
+                    "l'ABI x86-64 corrente: %u.\n",
+                    number);
+            break;
+
+        case EFAULT:
+            fprintf(stderr,
+                    "Richiesta SYSCALL_ADD non accessibile "
+                    "dal kernel.\n");
+            break;
+
+        default:
+            fprintf(stderr,
+                    "ioctl ST_IOCTL_SYSCALL_ADD fallita: %s\n",
+                    strerror(errno));
+            break;
+        }
+
+        return 1;
+    }
+
+    printf("System call %u registrata.\n", number);
+
+    return 0;
+}
+
+static int execute_syscall_remove(int fd, __u32 number)
+{
+    struct st_syscall_request request = {
+        .number = number,
+        .reserved = 0U,
+    };
+
+    if (ioctl(fd, ST_IOCTL_SYSCALL_REMOVE, &request) == -1) {
+        switch (errno) {
+        case EPERM:
+            fprintf(stderr,
+                    "Rimozione system call non consentita: "
+                    "sono richiesti privilegi root.\n");
+            break;
+
+        case ENOENT:
+            fprintf(stderr,
+                    "System call %u non registrata.\n",
+                    number);
+            break;
+
+        case EINVAL:
+            fprintf(stderr,
+                    "Numero di system call non valido per "
+                    "l'ABI x86-64 corrente: %u.\n",
+                    number);
+            break;
+
+        case EFAULT:
+            fprintf(stderr,
+                    "Richiesta SYSCALL_REMOVE non accessibile "
+                    "dal kernel.\n");
+            break;
+
+        default:
+            fprintf(stderr,
+                    "ioctl ST_IOCTL_SYSCALL_REMOVE fallita: %s\n",
+                    strerror(errno));
+            break;
+        }
+
+        return 1;
+    }
+
+    printf("System call %u rimossa.\n", number);
+
+    return 0;
 }
 
 int main(int argc, char *argv[])
 {
     __u32 uid = 0U;
+    __u32 syscall_number = 0U;
     const char *program_name = NULL;
     int uid_operation = 0;
     int program_operation = 0;
+    int syscall_operation = 0;
     int fd;
     int result;
 
@@ -668,6 +1034,21 @@ int main(int argc, char *argv[])
             program_operation = 1;
         else
             program_operation = 2;
+    } else if (argc == 3 &&
+               (strcmp(argv[1], "syscall-add") == 0 ||
+                strcmp(argv[1], "syscall-remove") == 0)) {
+        if (parse_syscall_number(argv[2],
+                                 &syscall_number) != 0) {
+            fprintf(stderr,
+                    "Numero di system call non valido: %s\n",
+                    argv[2]);
+            return 1;
+        }
+
+        if (strcmp(argv[1], "syscall-add") == 0)
+            syscall_operation = 1;
+        else
+            syscall_operation = 2;
     } else {
         print_usage(argv[0]);
         return 1;
@@ -690,6 +1071,10 @@ int main(int argc, char *argv[])
         result = execute_program_add(fd, program_name);
     else if (program_operation == 2)
         result = execute_program_remove(fd, program_name);
+    else if (syscall_operation == 1)
+        result = execute_syscall_add(fd, syscall_number);
+    else if (syscall_operation == 2)
+        result = execute_syscall_remove(fd, syscall_number);
     else
         result = execute_simple_command(fd, argv[1]);
 

@@ -5,6 +5,7 @@
 #include "device.h"
 #include "monitor_state.h"
 #include "program_registry.h"
+#include "syscall_registry.h"
 #include "uid_registry.h"
 
 static int __init syscall_throttle_init(void)
@@ -14,9 +15,11 @@ static int __init syscall_throttle_init(void)
     st_monitor_state_init();
     st_uid_registry_init();
     st_program_registry_init();
+    st_syscall_registry_init();
 
     ret = st_device_init();
     if (ret != 0) {
+        st_syscall_registry_exit();
         st_program_registry_exit();
         st_uid_registry_exit();
         st_monitor_state_exit();
@@ -34,6 +37,7 @@ static void __exit syscall_throttle_exit(void)
      * poi rilasciamo i registri e lo stato interno.
      */
     st_device_exit();
+    st_syscall_registry_exit();
     st_program_registry_exit();
     st_uid_registry_exit();
     st_monitor_state_exit();

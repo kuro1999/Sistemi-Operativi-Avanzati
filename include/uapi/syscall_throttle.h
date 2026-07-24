@@ -117,6 +117,52 @@ struct st_program_list_request {
 };
 
 /*
+ * Richiesta relativa a un numero di system call x86-64.
+ *
+ * number contiene il numero della system call.
+ * reserved deve essere inizializzato a zero.
+ *
+ * Il kernel verifica che number appartenga al dominio della
+ * ABI x86-64 nativa supportata dal kernel corrente.
+ */
+struct st_syscall_request {
+    __u32 number;
+    __u32 reserved;
+};
+
+/*
+ * Risposta contenente il numero di system call attualmente
+ * presenti nel registro.
+ *
+ * reserved viene restituito sempre a zero.
+ */
+struct st_syscall_count {
+    __u32 count;
+    __u32 reserved;
+};
+
+/*
+ * Richiesta per ottenere uno snapshot dei numeri di system call
+ * presenti nel registro.
+ *
+ * numbers_ptr indica un array user-space di elementi __u32.
+ *
+ * capacity indica quanti elementi possono essere contenuti
+ * nell'array.
+ *
+ * count viene aggiornato dal kernel con il numero di elementi
+ * necessari oppure effettivamente restituiti.
+ *
+ * reserved deve essere inizializzato a zero.
+ */
+struct st_syscall_list_request {
+    __aligned_u64 numbers_ptr;
+    __u32 capacity;
+    __u32 count;
+    __u32 reserved[2];
+};
+
+/*
  * Comando minimale usato per verificare la comunicazione con il driver.
  */
 #define ST_IOCTL_PING \
@@ -186,5 +232,22 @@ struct st_program_list_request {
 
 #define ST_IOCTL_PROGRAM_LIST \
     _IOWR(ST_IOCTL_MAGIC, 0x23, struct st_program_list_request)
+
+/*
+ * Gestione del registro dei numeri di system call x86-64.
+ *
+ * Le richieste vengono trasferite dallo user-space al kernel.
+ */
+#define ST_IOCTL_SYSCALL_ADD \
+    _IOW(ST_IOCTL_MAGIC, 0x30, struct st_syscall_request)
+
+#define ST_IOCTL_SYSCALL_REMOVE \
+    _IOW(ST_IOCTL_MAGIC, 0x31, struct st_syscall_request)
+
+#define ST_IOCTL_SYSCALL_GET_COUNT \
+    _IOR(ST_IOCTL_MAGIC, 0x32, struct st_syscall_count)
+
+#define ST_IOCTL_SYSCALL_LIST \
+    _IOWR(ST_IOCTL_MAGIC, 0x33, struct st_syscall_list_request)
 
 #endif
