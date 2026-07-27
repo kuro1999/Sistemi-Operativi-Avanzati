@@ -163,6 +163,19 @@ struct st_syscall_list_request {
 };
 
 /*
+ * Configurazione del limite globale.
+ *
+ * max_invocations indica il numero massimo di system call
+ * rilevanti ammesse durante una finestra di un secondo.
+ *
+ * I campi reserved devono essere impostati a zero.
+ */
+struct st_max_config {
+    __aligned_u64 max_invocations;
+    __u32 reserved[2];
+};
+
+/*
  * Comando minimale usato per verificare la comunicazione con il driver.
  */
 #define ST_IOCTL_PING \
@@ -249,5 +262,14 @@ struct st_syscall_list_request {
 
 #define ST_IOCTL_SYSCALL_LIST \
     _IOWR(ST_IOCTL_MAGIC, 0x33, struct st_syscall_list_request)
+
+/*
+ * Configurazione del limite globale di ammissioni.
+ */
+#define ST_IOCTL_MAX_SET \
+    _IOW(ST_IOCTL_MAGIC, 0x40, struct st_max_config)
+
+#define ST_IOCTL_MAX_GET \
+    _IOR(ST_IOCTL_MAGIC, 0x41, struct st_max_config)
 
 #endif

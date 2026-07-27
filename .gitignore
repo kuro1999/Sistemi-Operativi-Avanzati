@@ -33,3 +33,6 @@ core.*
 
 # Generated analysis files
 compile_commands.json
+
+/user/stctl
+/tests/policy_transition_stress

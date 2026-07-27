@@ -4,6 +4,7 @@
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
@@ -15,8 +16,18 @@
 #include "device.h"
 #include "monitor_state.h"
 #include "program_registry.h"
+#include "rate_limiter.h"
 #include "syscall_registry.h"
 #include "uid_registry.h"
+
+/*
+ * Serializza le transizioni amministrative che coinvolgono
+ * contemporaneamente monitor_state e rate_limiter.
+ *
+ * I registry UID, programmi e syscall possiedono invece
+ * sincronizzazione interna indipendente.
+ */
+static DEFINE_MUTEX(st_policy_lock);
 
 static int st_device_open(struct inode *inode, struct file *file)
 {
@@ -60,6 +71,81 @@ static long st_ioctl_get_status(unsigned long argument)
     pr_info("syscall_throttle: GET_STATUS da pid=%d: monitor %s\n",
             current->pid,
             enabled ? "attivo" : "disattivato");
+
+    return 0;
+}
+
+static long st_ioctl_max_set(unsigned long argument)
+{
+    struct st_max_config request;
+
+    /*
+     * Il controllo dei privilegi è già stato eseguito dal
+     * dispatcher prima di accedere al puntatore user-space.
+     */
+    if (copy_from_user(&request,
+                       (const void __user *)argument,
+                       sizeof(request)) != 0) {
+        pr_warn("syscall_throttle: MAX_SET fallito per pid=%d: "
+                "richiesta user-space non accessibile\n",
+                current->pid);
+        return -EFAULT;
+    }
+
+    /*
+     * I campi riservati devono essere zero per garantire
+     * la compatibilità con la versione corrente dell'UAPI.
+     */
+    if (request.reserved[0] != 0U ||
+        request.reserved[1] != 0U) {
+        pr_warn("syscall_throttle: MAX_SET rifiutato: "
+                "campi reserved non validi\n");
+        return -EINVAL;
+    }
+
+    /*
+    * Il cambio di MAX deve essere serializzato rispetto ad
+    * ENABLE e DISABLE, perché può riarmare il timer quando
+    * il rate limiter è attivo.
+     */
+    mutex_lock(&st_policy_lock);
+
+    st_rate_limiter_set_max(request.max_invocations);
+
+    mutex_unlock(&st_policy_lock);
+
+    pr_info("syscall_throttle: MAX impostato a %llu "
+            "da pid=%d\n",
+            (unsigned long long)request.max_invocations,
+            current->pid);
+
+    return 0;
+}
+
+static long st_ioctl_max_get(unsigned long argument)
+{
+    struct st_max_config response = {
+        .max_invocations = st_rate_limiter_get_max(),
+        .reserved = {0U, 0U},
+    };
+
+    /*
+     * MAX_GET è un'operazione pubblica di sola lettura.
+     * La struttura viene inizializzata completamente prima
+     * della copia verso lo user-space.
+     */
+    if (copy_to_user((void __user *)argument,
+                     &response,
+                     sizeof(response)) != 0) {
+        pr_warn("syscall_throttle: MAX_GET fallito per pid=%d: "
+                "risposta user-space non accessibile\n",
+                current->pid);
+        return -EFAULT;
+    }
+
+    pr_info("syscall_throttle: MAX_GET da pid=%d: MAX=%llu\n",
+            current->pid,
+            (unsigned long long)response.max_invocations);
 
     return 0;
 }
@@ -645,7 +731,9 @@ static long st_device_ioctl(struct file *file,
         pr_info("syscall_throttle: ricevuto ioctl PING\n");
         return 0;
 
-    case ST_IOCTL_ENABLE:
+    case ST_IOCTL_ENABLE: {
+        int ret;
+
         if (!st_caller_is_root()) {
             pr_warn("syscall_throttle: ENABLE rifiutato: "
                     "pid=%d euid=%u\n",
@@ -654,8 +742,48 @@ static long st_device_ioctl(struct file *file,
             return -EPERM;
         }
 
-        st_monitor_enable();
-        return 0;
+        /*
+         * Serializziamo la transizione rispetto a DISABLE
+         * e MAX_SET.
+         */
+        mutex_lock(&st_policy_lock);
+
+        /*
+         * ENABLE è idempotente: se il monitor è già attivo
+         * non resettiamo la finestra e non riarmiamo il timer.
+         */
+        if (st_monitor_is_enabled()) {
+            mutex_unlock(&st_policy_lock);
+
+            pr_info("syscall_throttle: ENABLE da pid=%d: "
+                    "monitor già attivo\n",
+                    current->pid);
+
+            return 0;
+        }
+
+        /*
+         * Prima prepariamo e armiamo il rate limiter.
+         * Soltanto dopo rendiamo visibile il monitor come attivo.
+         *
+         * Una futura syscall che osserva enabled == true
+         * troverà quindi il timer già configurato.
+         */
+        ret = st_rate_limiter_start();
+        if (ret == 0)
+            st_monitor_enable();
+
+        mutex_unlock(&st_policy_lock);
+
+        if (ret != 0) {
+            pr_err("syscall_throttle: ENABLE fallito: "
+                   "impossibile avviare il rate limiter, "
+                   "errore=%d\n",
+                   ret);
+        }
+
+        return ret;
+    }
 
     case ST_IOCTL_DISABLE:
         if (!st_caller_is_root()) {
@@ -666,7 +794,37 @@ static long st_device_ioctl(struct file *file,
             return -EPERM;
         }
 
+        /*
+         * Manteniamo il mutex durante timer_delete_sync().
+         * Questo impedisce a un ENABLE concorrente di riarmare
+         * il timer mentre DISABLE lo sta cancellando.
+         */
+        mutex_lock(&st_policy_lock);
+
+        /*
+         * DISABLE è idempotente: se il monitor è già spento
+         * non modifichiamo nuovamente la generazione.
+         */
+        if (!st_monitor_is_enabled()) {
+            mutex_unlock(&st_policy_lock);
+
+            pr_info("syscall_throttle: DISABLE da pid=%d: "
+                    "monitor già disattivato\n",
+                    current->pid);
+
+            return 0;
+        }
+
+        /*
+         * Prima rendiamo il monitor invisibile alle nuove
+         * system call, poi arrestiamo il timer e risvegliamo
+         * gli eventuali waiter.
+         */
         st_monitor_disable();
+        st_rate_limiter_stop();
+
+        mutex_unlock(&st_policy_lock);
+
         return 0;
 
     case ST_IOCTL_GET_STATUS:
@@ -1075,6 +1233,25 @@ static long st_device_ioctl(struct file *file,
 
         return 0;
     }
+    case ST_IOCTL_MAX_SET:
+        /*
+         * La modifica di MAX cambia la policy globale ed è
+         * quindi consentita soltanto a effective UID zero.
+         *
+         * Il controllo precede copy_from_user().
+         */
+        if (!st_caller_is_root()) {
+            pr_warn("syscall_throttle: MAX_SET rifiutato: "
+                    "pid=%d euid=%u\n",
+                    current->pid,
+                    __kuid_val(current_euid()));
+            return -EPERM;
+        }
+
+        return st_ioctl_max_set(argument);
+
+    case ST_IOCTL_MAX_GET:
+        return st_ioctl_max_get(argument);
 
     default:
         return -ENOTTY;

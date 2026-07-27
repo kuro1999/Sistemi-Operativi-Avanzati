@@ -28,7 +28,11 @@ static void print_usage(const char *program_name)
             "  %s syscall-add <numero>\n"
             "  %s syscall-remove <numero>\n"
             "  %s syscall-count\n"
-            "  %s syscall-list\n",
+            "  %s syscall-list\n"
+            "  %s max-set <valore>\n"
+            "  %s max-get\n",
+            program_name,
+            program_name,
             program_name,
             program_name,
             program_name,
@@ -384,6 +388,45 @@ static int parse_syscall_number(const char *text, __u32 *number)
      * dal kernel, perché dipende dal kernel in esecuzione.
      */
     *number = (__u32)value;
+
+    return 0;
+}
+
+static int parse_max_invocations(const char *text,
+                                 uint64_t *max_invocations)
+{
+    const char *cursor;
+    char *end;
+    unsigned long long value;
+
+    if (text == NULL ||
+        max_invocations == NULL ||
+        text[0] == '\0') {
+        return -1;
+    }
+
+    /*
+     * Accettiamo esclusivamente cifre decimali.
+     *
+     * Sono quindi esclusi segni, spazi, suffissi e
+     * rappresentazioni esadecimali o frazionarie.
+     */
+    for (cursor = text; *cursor != '\0'; cursor++) {
+        if (*cursor < '0' || *cursor > '9')
+            return -1;
+    }
+
+    errno = 0;
+    end = NULL;
+    value = strtoull(text, &end, 10);
+
+    if (errno == ERANGE ||
+        end == text ||
+        *end != '\0') {
+        return -1;
+    }
+
+    *max_invocations = (uint64_t)value;
 
     return 0;
 }
@@ -846,6 +889,83 @@ static int execute_syscall_list(int fd)
     return 1;
 }
 
+static int execute_max_set(int fd, uint64_t max_invocations)
+{
+    struct st_max_config request = {
+        .max_invocations = (__u64)max_invocations,
+        .reserved = {0U, 0U},
+    };
+
+    if (ioctl(fd, ST_IOCTL_MAX_SET, &request) == -1) {
+        switch (errno) {
+        case EPERM:
+            fprintf(stderr,
+                    "Modifica di MAX non consentita: "
+                    "sono richiesti privilegi root.\n");
+            break;
+
+        case EINVAL:
+            fprintf(stderr,
+                    "Richiesta MAX_SET non valida.\n");
+            break;
+
+        case EFAULT:
+            fprintf(stderr,
+                    "Richiesta MAX_SET non accessibile "
+                    "dal kernel.\n");
+            break;
+
+        default:
+            fprintf(stderr,
+                    "ioctl ST_IOCTL_MAX_SET fallita: %s\n",
+                    strerror(errno));
+            break;
+        }
+
+        return 1;
+    }
+
+    printf("MAX impostato a %llu invocazioni "
+           "per finestra globale di un secondo.\n",
+           (unsigned long long)max_invocations);
+
+    return 0;
+}
+
+static int execute_max_get(int fd)
+{
+    struct st_max_config response = {
+        .max_invocations = 0U,
+        .reserved = {0U, 0U},
+    };
+
+    if (ioctl(fd, ST_IOCTL_MAX_GET, &response) == -1) {
+        fprintf(stderr,
+                "ioctl ST_IOCTL_MAX_GET fallita: %s\n",
+                strerror(errno));
+        return 1;
+    }
+
+    /*
+     * Il kernel deve restituire i campi riservati a zero.
+     * Un valore diverso indicherebbe una risposta incompatibile
+     * con la versione corrente dell'UAPI.
+     */
+    if (response.reserved[0] != 0U ||
+        response.reserved[1] != 0U) {
+        fprintf(stderr,
+                "Il driver ha restituito una risposta "
+                "MAX_GET non valida.\n");
+        return 1;
+    }
+
+    printf("MAX: %llu invocazioni per finestra "
+           "globale di un secondo.\n",
+           (unsigned long long)response.max_invocations);
+
+    return 0;
+}
+
 static int is_simple_command(const char *command)
 {
     return strcmp(command, "ping") == 0 ||
@@ -857,7 +977,8 @@ static int is_simple_command(const char *command)
            strcmp(command, "program-count") == 0 ||
            strcmp(command, "program-list") == 0 ||
            strcmp(command, "syscall-count") == 0 ||
-           strcmp(command, "syscall-list") == 0;
+           strcmp(command, "syscall-list") == 0 ||
+           strcmp(command, "max-get") == 0;
 }
 
 static int execute_simple_command(int fd, const char *command)
@@ -891,6 +1012,11 @@ static int execute_simple_command(int fd, const char *command)
 
     if (strcmp(command, "syscall-list") == 0)
         return execute_syscall_list(fd);
+
+    if (strcmp(command, "max-get") == 0)
+        return execute_max_get(fd);
+
+    return 1;
 
     return 1;
 }
@@ -997,20 +1123,27 @@ int main(int argc, char *argv[])
 {
     __u32 uid = 0U;
     __u32 syscall_number = 0U;
+    uint64_t max_invocations = 0U;
     const char *program_name = NULL;
     int uid_operation = 0;
     int program_operation = 0;
     int syscall_operation = 0;
+    int max_operation = 0;
     int fd;
     int result;
 
     if (argc == 2 && is_simple_command(argv[1])) {
-        uid_operation = 0;
+        /*
+         * I comandi semplici non richiedono ulteriori
+         * operazioni di parsing.
+         */
     } else if (argc == 3 &&
                (strcmp(argv[1], "uid-add") == 0 ||
                 strcmp(argv[1], "uid-remove") == 0)) {
         if (parse_uid(argv[2], &uid) != 0) {
-            fprintf(stderr, "UID non valido: %s\n", argv[2]);
+            fprintf(stderr,
+                    "UID non valido: %s\n",
+                    argv[2]);
             return 1;
         }
 
@@ -1018,6 +1151,7 @@ int main(int argc, char *argv[])
             uid_operation = 1;
         else
             uid_operation = 2;
+
     } else if (argc == 3 &&
                (strcmp(argv[1], "program-add") == 0 ||
                 strcmp(argv[1], "program-remove") == 0)) {
@@ -1034,6 +1168,7 @@ int main(int argc, char *argv[])
             program_operation = 1;
         else
             program_operation = 2;
+
     } else if (argc == 3 &&
                (strcmp(argv[1], "syscall-add") == 0 ||
                 strcmp(argv[1], "syscall-remove") == 0)) {
@@ -1049,6 +1184,19 @@ int main(int argc, char *argv[])
             syscall_operation = 1;
         else
             syscall_operation = 2;
+
+    } else if (argc == 3 &&
+               strcmp(argv[1], "max-set") == 0) {
+        if (parse_max_invocations(argv[2],
+                                  &max_invocations) != 0) {
+            fprintf(stderr,
+                    "Valore MAX non valido: %s\n",
+                    argv[2]);
+            return 1;
+        }
+
+        max_operation = 1;
+
     } else {
         print_usage(argv[0]);
         return 1;
@@ -1075,6 +1223,8 @@ int main(int argc, char *argv[])
         result = execute_syscall_add(fd, syscall_number);
     else if (syscall_operation == 2)
         result = execute_syscall_remove(fd, syscall_number);
+    else if (max_operation == 1)
+        result = execute_max_set(fd, max_invocations);
     else
         result = execute_simple_command(fd, argv[1]);
 
