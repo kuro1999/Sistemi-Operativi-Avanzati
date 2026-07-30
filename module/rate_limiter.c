@@ -164,8 +164,8 @@ st_rate_limiter_try_acquire(u64 *window_generation)
     enum st_rate_limiter_decision decision;
 
     /*
-     * La futura chiamata avverrà in process context, mentre
-     * il timer modifica lo stesso stato in softirq context.
+     * La chiamata avviene in process context, mentre il timer
+     * modifica lo stesso stato in softirq context.
      */
     spin_lock_bh(&st_rate_limiter.lock);
 
@@ -208,6 +208,49 @@ st_rate_limiter_try_acquire(u64 *window_generation)
     spin_unlock_bh(&st_rate_limiter.lock);
 
     return decision;
+}
+
+/*
+ * La condizione viene valutata sia prima dell'addormentamento
+ * sia dopo ogni wake-up.
+ *
+ * Acquisiamo lo stesso lock usato dagli aggiornamenti per evitare
+ * letture incoerenti tra generation, running e stopping.
+ */
+static bool st_rate_limiter_state_changed(
+    u64 observed_generation)
+{
+    bool changed;
+
+    spin_lock_bh(&st_rate_limiter.lock);
+
+    changed =
+        st_rate_limiter.generation != observed_generation ||
+        !st_rate_limiter.running ||
+        st_rate_limiter.stopping;
+
+    spin_unlock_bh(&st_rate_limiter.lock);
+
+    return changed;
+}
+
+int st_rate_limiter_wait_for_change(
+    u64 observed_generation)
+{
+    /*
+     * wait_event_interruptible() evita la lost wake-up race:
+     *
+     * - il chiamante osserva THROTTLE nella generazione G;
+     * - il timer apre G+1 prima che il task si addormenti;
+     * - la condizione risulta già vera;
+     * - il task non dorme sulla vecchia finestra.
+     *
+     * Un segnale pendente interrompe l'attesa con -ERESTARTSYS.
+     */
+    return wait_event_interruptible(
+        st_rate_limiter.wait_queue,
+        st_rate_limiter_state_changed(
+            observed_generation));
 }
 
 void st_rate_limiter_set_max(u64 max_invocations)
@@ -267,8 +310,8 @@ void st_rate_limiter_exit(void)
     spin_unlock_bh(&st_rate_limiter.lock);
 
     /*
-     * In futuro questo wake-up permetterà ai thread in attesa
-     * di uscire quando il modulo viene smantellato.
+     * I thread bloccati osservano stopping == true e possono
+     * terminare il ciclo di attesa prima del teardown dell'hook.
      */
     wake_up_all(&st_rate_limiter.wait_queue);
 

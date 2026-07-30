@@ -36,3 +36,5 @@ compile_commands.json
 
 /user/stctl
 /tests/policy_transition_stress
+/tests/syscall_hook_smoke
+/tests/syscall_hook_signal

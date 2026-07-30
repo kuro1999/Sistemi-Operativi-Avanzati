@@ -37,6 +37,25 @@ void st_rate_limiter_stop(void);
  */
 enum st_rate_limiter_decision
 st_rate_limiter_try_acquire(u64 *window_generation);
+
+/*
+ * Attende in modo interrompibile che lo stato osservato dal
+ * chiamante non sia più valido.
+ *
+ * L'attesa termina quando:
+ *
+ * - si apre una nuova finestra;
+ * - viene modificato MAX;
+ * - il rate limiter viene arrestato da DISABLE;
+ * - il componente entra in teardown.
+ *
+ * Restituisce:
+ *   0             stato modificato, ripetere try_acquire()
+ *   -ERESTARTSYS  attesa interrotta da un segnale
+ */
+int st_rate_limiter_wait_for_change(
+    u64 observed_generation);
+
 /*
  * Imposta il numero massimo di invocazioni ammesse
  * in una finestra globale di un secondo.
