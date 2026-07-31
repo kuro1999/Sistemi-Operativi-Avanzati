@@ -1042,6 +1042,15 @@ static int execute_syscall_add(int fd, __u32 number)
                     number);
             break;
 
+        case EOPNOTSUPP:
+            fprintf(stderr,
+                    "System call %u non supportata: "
+                    "delete_module non può essere sottoposta "
+                    "a throttling perché è necessaria alla "
+                    "rimozione sicura del modulo.\n",
+                    number);
+            break;
+
         case EINVAL:
             fprintf(stderr,
                     "Numero di system call non valido per "
