@@ -6,6 +6,7 @@
 #include "monitor_state.h"
 #include "program_registry.h"
 #include "rate_limiter.h"
+#include "statistics.h"
 #include "syscall_hook.h"
 #include "syscall_registry.h"
 #include "uid_registry.h"
@@ -19,6 +20,7 @@ static int __init syscall_throttle_init(void)
     st_program_registry_init();
     st_syscall_registry_init();
     st_rate_limiter_init();
+    st_statistics_init();
 
     /*
      * L'hook viene installato soltanto dopo che registry e
@@ -44,10 +46,12 @@ fail_device:
      */
     st_rate_limiter_exit();
     st_syscall_hook_exit();
+    st_statistics_exit();
     goto fail_common;
 
 fail_syscall_hook:
     st_rate_limiter_exit();
+    st_statistics_exit();
 
 fail_common:
     st_syscall_registry_exit();
@@ -78,6 +82,7 @@ static void __exit syscall_throttle_exit(void)
      */
     st_rate_limiter_exit();
     st_syscall_hook_exit();
+    st_statistics_exit();
 
     st_syscall_registry_exit();
     st_program_registry_exit();

@@ -30,7 +30,11 @@ static void print_usage(const char *program_name)
             "  %s syscall-count\n"
             "  %s syscall-list\n"
             "  %s max-set <valore>\n"
-            "  %s max-get\n",
+            "  %s max-get\n"
+            "  %s stats\n"
+            "  %s stats-reset\n",
+            program_name,
+            program_name,
             program_name,
             program_name,
             program_name,
@@ -966,6 +970,193 @@ static int execute_max_get(int fd)
     return 0;
 }
 
+
+static int execute_statistics_get(int fd)
+{
+    struct st_statistics_snapshot snapshot = {0};
+    double average_blocked;
+    double average_delay_ms;
+    unsigned int index;
+
+    if (ioctl(
+            fd,
+            ST_IOCTL_STATS_GET,
+            &snapshot) == -1) {
+        fprintf(stderr,
+                "ioctl ST_IOCTL_STATS_GET fallita: %s\n",
+                strerror(errno));
+        return 1;
+    }
+
+    for (index = 0U;
+         index <
+             sizeof(snapshot.reserved) /
+             sizeof(snapshot.reserved[0]);
+         index++) {
+        if (snapshot.reserved[index] != 0U) {
+            fprintf(stderr,
+                    "Snapshot statistiche non valido: "
+                    "reserved[%u]=%u.\n",
+                    index,
+                    snapshot.reserved[index]);
+            return 1;
+        }
+    }
+
+    if (snapshot.peak_valid > 1U ||
+        snapshot.session_active > 1U) {
+        fprintf(stderr,
+                "Snapshot statistiche non valido: "
+                "flag fuori dominio.\n");
+        return 1;
+    }
+
+    if (snapshot.current_blocked >
+        snapshot.peak_blocked) {
+        fprintf(stderr,
+                "Snapshot statistiche incoerente: "
+                "current_blocked > peak_blocked.\n");
+        return 1;
+    }
+
+    /*
+     * Controllo scritto senza sommare prima i contatori,
+     * così resta corretto anche in caso di saturazione a U64_MAX.
+     */
+    if (snapshot.completed_blocked_invocations >
+            snapshot.blocked_invocations ||
+        snapshot.interrupted_blocked_invocations >
+            snapshot.blocked_invocations -
+                snapshot.completed_blocked_invocations) {
+        fprintf(stderr,
+                "Snapshot statistiche incoerente: "
+                "eventi conclusi superiori agli eventi "
+                "di blocco.\n");
+        return 1;
+    }
+
+    if (snapshot.peak_valid != 0U &&
+        memchr(
+            snapshot.peak_program,
+            '\0',
+            sizeof(snapshot.peak_program)) == NULL) {
+        fprintf(stderr,
+                "Snapshot statistiche non valido: "
+                "nome del programma non terminato da NUL.\n");
+        return 1;
+    }
+
+    if (snapshot.observation_ns == 0U) {
+        average_blocked = 0.0;
+    } else {
+        average_blocked =
+            (double)snapshot.blocked_thread_time_ns /
+            (double)snapshot.observation_ns;
+    }
+
+    if (snapshot.completed_blocked_invocations == 0U) {
+        average_delay_ms = 0.0;
+    } else {
+        average_delay_ms =
+            ((double)snapshot.total_delay_ns /
+             (double)snapshot.completed_blocked_invocations) /
+            1000000.0;
+    }
+
+    printf("Sessione statistiche: %s\n",
+           snapshot.session_active != 0U
+               ? "attiva"
+               : "inattiva");
+
+    printf("Durata osservazione: %.6f secondi\n",
+           (double)snapshot.observation_ns /
+               1000000000.0);
+
+    printf("Invocazioni rilevanti: %llu\n",
+           (unsigned long long)
+               snapshot.relevant_invocations);
+
+    printf("Invocazioni bloccate: %llu\n",
+           (unsigned long long)
+               snapshot.blocked_invocations);
+
+    printf("Invocazioni bloccate completate: %llu\n",
+           (unsigned long long)
+               snapshot.completed_blocked_invocations);
+
+    printf("Attese interrotte da segnale: %llu\n",
+           (unsigned long long)
+               snapshot.interrupted_blocked_invocations);
+
+    printf("Thread attualmente bloccati: %u\n",
+           snapshot.current_blocked);
+
+    printf("Picco thread bloccati: %u\n",
+           snapshot.peak_blocked);
+
+    printf("Media temporale thread bloccati: %.6f\n",
+           average_blocked);
+
+    if (snapshot.completed_blocked_invocations == 0U) {
+        printf("Ritardo medio delle chiamate bloccate: "
+               "non disponibile\n");
+    } else {
+        printf("Ritardo medio delle chiamate bloccate: "
+               "%.6f ms\n",
+               average_delay_ms);
+    }
+
+    if (snapshot.peak_valid == 0U) {
+        printf("Peak delay: non disponibile\n");
+        printf("System call del peak: non disponibile\n");
+        printf("Effective UID del peak: non disponibile\n");
+        printf("Programma del peak: non disponibile\n");
+    } else {
+        printf("Peak delay: %llu ns (%.6f ms)\n",
+               (unsigned long long)
+                   snapshot.peak_delay_ns,
+               (double)snapshot.peak_delay_ns /
+                   1000000.0);
+
+        printf("System call del peak: %u\n",
+               snapshot.peak_syscall_nr);
+
+        printf("Effective UID del peak: %u\n",
+               snapshot.peak_euid);
+
+        printf("Programma del peak: %s\n",
+               snapshot.peak_program);
+    }
+
+    return 0;
+}
+
+
+static int execute_statistics_reset(int fd)
+{
+    if (ioctl(fd, ST_IOCTL_STATS_RESET) == -1) {
+        if (errno == EPERM) {
+            fprintf(stderr,
+                    "Reset statistiche non consentito: "
+                    "sono richiesti privilegi root.\n");
+        } else if (errno == EBUSY) {
+            fprintf(stderr,
+                    "Reset statistiche non eseguibile: "
+                    "esistono thread attualmente bloccati.\n");
+        } else {
+            fprintf(stderr,
+                    "ioctl ST_IOCTL_STATS_RESET fallita: %s\n",
+                    strerror(errno));
+        }
+
+        return 1;
+    }
+
+    printf("Statistiche azzerate.\n");
+    return 0;
+}
+
+
 static int is_simple_command(const char *command)
 {
     return strcmp(command, "ping") == 0 ||
@@ -978,10 +1169,14 @@ static int is_simple_command(const char *command)
            strcmp(command, "program-list") == 0 ||
            strcmp(command, "syscall-count") == 0 ||
            strcmp(command, "syscall-list") == 0 ||
-           strcmp(command, "max-get") == 0;
+           strcmp(command, "max-get") == 0 ||
+           strcmp(command, "stats") == 0 ||
+           strcmp(command, "stats-reset") == 0;
 }
 
-static int execute_simple_command(int fd, const char *command)
+static int execute_simple_command(
+    int fd,
+    const char *command)
 {
     if (strcmp(command, "ping") == 0)
         return execute_ping(fd);
@@ -1016,7 +1211,11 @@ static int execute_simple_command(int fd, const char *command)
     if (strcmp(command, "max-get") == 0)
         return execute_max_get(fd);
 
-    return 1;
+    if (strcmp(command, "stats") == 0)
+        return execute_statistics_get(fd);
+
+    if (strcmp(command, "stats-reset") == 0)
+        return execute_statistics_reset(fd);
 
     return 1;
 }

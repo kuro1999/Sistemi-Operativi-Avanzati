@@ -176,6 +176,55 @@ struct st_max_config {
 };
 
 /*
+ * Snapshot delle statistiche del throttling.
+ *
+ * observation_ns:
+ *   durata della sessione statistica.
+ *
+ * blocked_thread_time_ns:
+ *   integrale temporale del numero di thread bloccati,
+ *   espresso in thread-nanosecondi.
+ *
+ * La media temporale dei thread bloccati viene calcolata
+ * nello user-space come:
+ *
+ *   blocked_thread_time_ns / observation_ns
+ *
+ * peak_delay_ns misura il massimo intervallo trascorso tra il
+ * primo THROTTLE e l'esecuzione effettiva della system call.
+ *
+ * peak_valid indica se i campi peak_* contengono un campione
+ * valido. session_active indica se la sessione è ancora aperta.
+ *
+ * Tutti i campi reserved devono essere zero.
+ */
+struct st_statistics_snapshot {
+    __aligned_u64 observation_ns;
+    __aligned_u64 blocked_thread_time_ns;
+
+    __aligned_u64 relevant_invocations;
+    __aligned_u64 blocked_invocations;
+    __aligned_u64 completed_blocked_invocations;
+    __aligned_u64 interrupted_blocked_invocations;
+
+    __aligned_u64 total_delay_ns;
+    __aligned_u64 peak_delay_ns;
+
+    __u32 current_blocked;
+    __u32 peak_blocked;
+
+    __u32 peak_syscall_nr;
+    __u32 peak_euid;
+
+    __u32 peak_valid;
+    __u32 session_active;
+
+    char peak_program[ST_PROGRAM_NAME_CAPACITY];
+
+    __u32 reserved[4];
+};
+
+/*
  * Comando minimale usato per verificare la comunicazione con il driver.
  */
 #define ST_IOCTL_PING \
@@ -271,5 +320,17 @@ struct st_max_config {
 
 #define ST_IOCTL_MAX_GET \
     _IOR(ST_IOCTL_MAGIC, 0x41, struct st_max_config)
+
+/*
+ * Consultazione e reset delle statistiche.
+ *
+ * STATS_GET è pubblico e restituisce uno snapshot coerente.
+ * STATS_RESET non trasferisce dati ed è riservato a root.
+ */
+#define ST_IOCTL_STATS_GET \
+    _IOR(ST_IOCTL_MAGIC, 0x50, struct st_statistics_snapshot)
+
+#define ST_IOCTL_STATS_RESET \
+    _IO(ST_IOCTL_MAGIC, 0x51)
 
 #endif

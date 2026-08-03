@@ -17,6 +17,7 @@
 #include "monitor_state.h"
 #include "program_registry.h"
 #include "rate_limiter.h"
+#include "statistics.h"
 #include "syscall_registry.h"
 #include "uid_registry.h"
 
@@ -720,6 +721,32 @@ static long st_ioctl_program_list(unsigned long argument)
 
 
 
+/*
+ * Restituisce uno snapshot coerente delle statistiche.
+ *
+ * La struttura viene inizializzata completamente dal componente
+ * statistics prima del trasferimento verso lo user-space.
+ */
+static long st_ioctl_stats_get(unsigned long argument)
+{
+    struct st_statistics_snapshot snapshot;
+
+    st_statistics_get_snapshot(&snapshot);
+
+    if (copy_to_user(
+            (void __user *)argument,
+            &snapshot,
+            sizeof(snapshot)) != 0) {
+        pr_warn("syscall_throttle: STATS_GET fallito per "
+                "pid=%d: puntatore user-space non valido\n",
+                current->pid);
+        return -EFAULT;
+    }
+
+    return 0;
+}
+
+
 static long st_device_ioctl(struct file *file,
                             unsigned int command,
                             unsigned long argument)
@@ -770,8 +797,14 @@ static long st_device_ioctl(struct file *file,
          * troverà quindi il timer già configurato.
          */
         ret = st_rate_limiter_start();
-        if (ret == 0)
+        if (ret == 0) {
+            /*
+             * La sessione deve essere pronta prima che il
+             * monitor diventi visibile come attivo.
+             */
+            st_statistics_session_start();
             st_monitor_enable();
+        }
 
         mutex_unlock(&st_policy_lock);
 
@@ -822,6 +855,7 @@ static long st_device_ioctl(struct file *file,
          */
         st_monitor_disable();
         st_rate_limiter_stop();
+        st_statistics_session_stop();
 
         mutex_unlock(&st_policy_lock);
 
@@ -1262,6 +1296,36 @@ static long st_device_ioctl(struct file *file,
 
     case ST_IOCTL_MAX_GET:
         return st_ioctl_max_get(argument);
+
+    case ST_IOCTL_STATS_GET:
+        return st_ioctl_stats_get(argument);
+
+    case ST_IOCTL_STATS_RESET: {
+        int ret;
+
+        /*
+         * Il reset modifica lo stato globale delle statistiche
+         * ed è quindi riservato a effective UID zero.
+         */
+        if (!st_caller_is_root()) {
+            pr_warn("syscall_throttle: STATS_RESET rifiutato: "
+                    "pid=%d euid=%u\n",
+                    current->pid,
+                    __kuid_val(current_euid()));
+            return -EPERM;
+        }
+
+        mutex_lock(&st_policy_lock);
+        ret = st_statistics_reset();
+        mutex_unlock(&st_policy_lock);
+
+        if (ret == -EBUSY) {
+            pr_warn("syscall_throttle: STATS_RESET rifiutato: "
+                    "esistono thread bloccati\n");
+        }
+
+        return ret;
+    }
 
     default:
         return -ENOTTY;

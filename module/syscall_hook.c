@@ -22,8 +22,10 @@
 #include <linux/wait.h>
 
 #include "monitor_state.h"
+#include "program_identity.h"
 #include "program_registry.h"
 #include "rate_limiter.h"
+#include "statistics.h"
 #include "syscall_hook.h"
 #include "syscall_registry.h"
 #include "uid_registry.h"
@@ -746,17 +748,26 @@ static asmlinkage long notrace st_call_original_syscall(
  * context e non nel callback Ftrace.
  */
 static bool st_syscall_is_relevant(
-    unsigned int syscall_nr)
+    unsigned int syscall_nr,
+    char *program_name,
+    size_t program_name_capacity,
+    bool *program_name_valid)
 {
+    int identity_ret;
+
+    if (program_name_valid != NULL)
+        *program_name_valid = false;
+
+    if (program_name != NULL &&
+        program_name_capacity != 0U) {
+        program_name[0] = '\0';
+    }
+
     if (!st_monitor_is_enabled()) {
         atomic64_inc(&st_hook_monitor_disabled_calls);
         return false;
     }
 
-    /*
-     * Il registro delle syscall utilizza una bitmap e questa
-     * lettura è lockless.
-     */
     if (!st_syscall_registry_contains(syscall_nr)) {
         atomic64_inc(
             &st_hook_unregistered_syscall_calls);
@@ -764,11 +775,36 @@ static bool st_syscall_is_relevant(
     }
 
     /*
-     * Lo short-circuit evita l'identificazione più costosa
-     * dell'eseguibile quando l'effective UID è già registrato.
+     * Quando l'UID è registrato non serve identificare subito
+     * l'eseguibile. Il basename sarà acquisito soltanto se la
+     * chiamata subirà effettivamente un THROTTLE.
      */
-    if (st_uid_registry_contains(current_euid()) ||
-        st_program_registry_contains_current()) {
+    if (st_uid_registry_contains(current_euid())) {
+        atomic64_inc(&st_hook_relevant_calls);
+        return true;
+    }
+
+    if (program_name == NULL ||
+        program_name_capacity == 0U) {
+        atomic64_inc(&st_hook_unmatched_identity_calls);
+        return false;
+    }
+
+    /*
+     * Nel percorso basato sul programma conserviamo il basename
+     * già usato per il matching, evitando di ricavarlo nuovamente
+     * al primo THROTTLE.
+     */
+    identity_ret =
+        st_program_get_current_name(
+            program_name,
+            program_name_capacity);
+
+    if (identity_ret == 0 &&
+        st_program_registry_contains(program_name)) {
+        if (program_name_valid != NULL)
+            *program_name_valid = true;
+
         atomic64_inc(&st_hook_relevant_calls);
         return true;
     }
@@ -776,6 +812,7 @@ static bool st_syscall_is_relevant(
     atomic64_inc(&st_hook_unmatched_identity_calls);
     return false;
 }
+
 
 /*
  * Registra ogni decisione presa dal rate limiter.
@@ -1025,15 +1062,36 @@ st_generic_syscall_wrapper(
     const struct pt_regs *regs,
     unsigned long original_ip)
 {
+    struct st_statistics_block_context
+        statistics_context;
+
     enum st_rate_limiter_decision decision;
     const struct st_hook_target *target;
     st_x64_syscall_t original_syscall;
+
+    char statistics_program_name[
+        ST_PROGRAM_NAME_CAPACITY];
+
     u64 observed_generation;
     unsigned long raw_syscall_nr;
     unsigned int syscall_nr;
+
+    bool statistics_program_name_valid;
+    bool first_throttle_seen;
     bool release_active_call;
+
     long result;
+    int identity_ret;
     int wait_ret;
+
+    memset(
+        &statistics_context,
+        0,
+        sizeof(statistics_context));
+
+    statistics_program_name[0] = '\0';
+    statistics_program_name_valid = false;
+    first_throttle_seen = false;
 
     release_active_call = true;
     target = NULL;
@@ -1041,11 +1099,6 @@ st_generic_syscall_wrapper(
     raw_syscall_nr = READ_ONCE(regs->orig_ax);
     syscall_nr = (unsigned int)raw_syscall_nr;
 
-    /*
-     * La conversione deve essere esatta e la coppia
-     * numero/indirizzo deve appartenere alla tabella dei
-     * target installati.
-     */
     if (raw_syscall_nr == (unsigned long)syscall_nr) {
         target = st_hook_target_find(
             syscall_nr,
@@ -1063,28 +1116,34 @@ st_generic_syscall_wrapper(
         goto out;
     }
 
-    /*
-     * original_syscall è ora una variabile locale del wrapper.
-     * Resta valida anche se il task si addormenta, viene
-     * deschedulato o riprende su un'altra CPU.
-     */
     original_syscall =
         (st_x64_syscall_t)original_ip;
 
     atomic64_inc(&st_hook_total_calls);
 
     /*
-     * Le chiamate non rilevanti attraversano immediatamente
-     * il wrapper senza consultare il rate limiter.
+     * La classificazione può restituire anche il basename già
+     * usato per il matching sul registro dei programmi.
      */
-    if (!st_syscall_is_relevant(syscall_nr)) {
+    if (!st_syscall_is_relevant(
+            syscall_nr,
+            statistics_program_name,
+            sizeof(statistics_program_name),
+            &statistics_program_name_valid)) {
         result = st_call_original_syscall(
             target,
             original_syscall,
             regs,
             &release_active_call);
+
         goto out;
     }
+
+    /*
+     * La chiamata rilevante viene contata una sola volta,
+     * indipendentemente dai retry del rate limiter.
+     */
+    st_statistics_record_relevant_invocation();
 
     for (;;) {
         decision = st_rate_limiter_try_acquire(
@@ -1096,18 +1155,70 @@ st_generic_syscall_wrapper(
         case ST_RATE_LIMITER_ALLOW:
         case ST_RATE_LIMITER_BYPASS:
         case ST_RATE_LIMITER_SHUTDOWN:
+            /*
+             * Se esiste un contesto bloccato, la misura termina
+             * immediatamente prima della syscall originale.
+             *
+             * Per una chiamata ammessa subito la funzione è
+             * intenzionalmente un no-op.
+             */
+            st_statistics_block_complete(
+                &statistics_context);
+
             result = st_call_original_syscall(
-            target,
-            original_syscall,
-            regs,
-            &release_active_call);
+                target,
+                original_syscall,
+                regs,
+                &release_active_call);
+
             goto out;
 
         case ST_RATE_LIMITER_THROTTLE:
             /*
-             * Il puntatore alla funzione originale rimane
-             * conservato nel frame del wrapper durante l'attesa.
+             * Una stessa invocazione può osservare più decisioni
+             * THROTTLE, ma deve aprire un solo contesto statistico.
              */
+            if (!first_throttle_seen) {
+                kuid_t blocked_euid;
+
+                first_throttle_seen = true;
+                blocked_euid = current_euid();
+
+                /*
+                 * Nel percorso di rilevanza basato sull'UID il
+                 * basename non è stato ancora acquisito.
+                 */
+                if (!statistics_program_name_valid) {
+                    identity_ret =
+                        st_program_get_current_name(
+                            statistics_program_name,
+                            sizeof(
+                                statistics_program_name));
+
+                    if (identity_ret == 0) {
+                        statistics_program_name_valid =
+                            true;
+                    } else {
+                        /*
+                         * Un fallimento nella sola raccolta
+                         * statistica non deve alterare throttling
+                         * o risultato della syscall.
+                         */
+                        strscpy(
+                            statistics_program_name,
+                            "<unavailable>",
+                            sizeof(
+                                statistics_program_name));
+                    }
+                }
+
+                st_statistics_block_begin(
+                    &statistics_context,
+                    syscall_nr,
+                    blocked_euid,
+                    statistics_program_name);
+            }
+
             wait_ret =
                 st_rate_limiter_wait_for_change(
                     observed_generation);
@@ -1116,20 +1227,29 @@ st_generic_syscall_wrapper(
                 atomic64_inc(
                     &st_hook_wait_interrupted_calls);
 
+                /*
+                 * La syscall originale non verrà eseguita.
+                 * L'attesa viene registrata come interrotta e
+                 * non contribuisce al peak delay.
+                 */
+                st_statistics_block_interrupted(
+                    &statistics_context);
+
                 result = wait_ret;
                 goto out;
             }
 
             /*
-             * Il wake-up non assegna automaticamente il budget.
-             * Il task deve competere nuovamente tramite
-             * try_acquire().
+             * Il wake-up non assegna automaticamente il budget:
+             * la richiesta compete nuovamente tramite acquire.
              */
             break;
         }
     }
 
 out:
+    WARN_ON_ONCE(statistics_context.counted);
+
     if (release_active_call)
         st_hook_active_call_put();
 
