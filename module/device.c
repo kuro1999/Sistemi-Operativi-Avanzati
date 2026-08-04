@@ -849,13 +849,18 @@ static long st_device_ioctl(struct file *file,
         }
 
         /*
-         * Prima rendiamo il monitor invisibile alle nuove
-         * system call, poi arrestiamo il timer e risvegliamo
-         * gli eventuali waiter.
+         * Ordine della disattivazione:
+         *
+         * 1. impediamo alle nuove syscall di entrare nella policy;
+         * 2. congeliamo atomicamente lo snapshot statistico;
+         * 3. arrestiamo il rate limiter e risvegliamo i waiter.
+         *
+         * Congelare le statistiche prima del wake-up impedisce ai
+         * waiter rilasciati di modificare lo snapshot dopo DISABLE.
          */
         st_monitor_disable();
-        st_rate_limiter_stop();
         st_statistics_session_stop();
+        st_rate_limiter_stop();
 
         mutex_unlock(&st_policy_lock);
 

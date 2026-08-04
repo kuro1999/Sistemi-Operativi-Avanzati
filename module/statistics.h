@@ -40,7 +40,11 @@ void st_statistics_exit(void);
 void st_statistics_session_start(void);
 
 /*
- * Chiude la sessione corrente conservandone i risultati.
+ * Chiude e congela la sessione corrente.
+ *
+ * Il tempo dei waiter viene contabilizzato fino all'istante di
+ * chiusura. Gli eventi successivi dei waiter rilasciati non
+ * modificano più lo snapshot conservato.
  */
 void st_statistics_session_stop(void);
 

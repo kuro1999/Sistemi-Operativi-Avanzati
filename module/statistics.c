@@ -240,15 +240,28 @@ void st_statistics_session_start(void)
 }
 
 
+/*
+ * Chiude definitivamente la sessione statistica corrente.
+ *
+ * Il punto di congelamento è protetto da st_statistics_lock.
+ * Tutto ciò che è stato completato prima di questo punto resta
+ * visibile; gli eventi successivi dei waiter ancora presenti
+ * vengono ignorati.
+ *
+ * Il tempo pesato dei waiter viene prima integrato fino a now_ns.
+ * Soltanto dopo current_blocked viene portato a zero.
+ */
 void st_statistics_session_stop(void)
 {
     unsigned long flags;
     u64 generation;
     u64 now_ns;
+    u32 released_blocked;
     bool stopped;
 
     now_ns = ktime_get_ns();
     generation = 0U;
+    released_blocked = 0U;
     stopped = false;
 
     spin_lock_irqsave(
@@ -256,14 +269,36 @@ void st_statistics_session_stop(void)
         flags);
 
     if (st_statistics.session_active) {
+        /*
+         * Account finale:
+         *
+         * blocked_thread_time_ns +=
+         *     current_blocked *
+         *     (now_ns - last_blocked_change_ns)
+         */
         st_statistics_account_blocked_time_locked(
             now_ns);
 
         st_statistics.session_stop_ns =
             now_ns;
 
-        st_statistics.session_active =
-            false;
+        st_statistics.last_blocked_change_ns =
+            now_ns;
+
+        released_blocked =
+            st_statistics.current_blocked;
+
+        /*
+         * Dal punto di vista dello snapshot non esistono più
+         * waiter appartenenti a una sessione ormai chiusa.
+         *
+         * I relativi contesti locali rimangono validi sullo
+         * stack dei wrapper, ma block_finish() li disarmerà
+         * senza modificare i contatori.
+         */
+        st_statistics.current_blocked = 0U;
+
+        st_statistics.session_active = false;
 
         generation =
             st_statistics.generation;
@@ -277,8 +312,10 @@ void st_statistics_session_stop(void)
 
     if (stopped) {
         pr_info("syscall_throttle: sessione statistiche "
-                "arrestata: generazione=%llu\n",
-                (unsigned long long)generation);
+                "arrestata: generazione=%llu, "
+                "waiter_congelati=%u\n",
+                (unsigned long long)generation,
+                released_blocked);
     }
 }
 
@@ -475,17 +512,21 @@ static void st_statistics_block_finish(
             st_statistics.generation;
 
     /*
-     * Il contesto appartiene a una sessione ormai sostituita.
-     * Non deve alterare current_blocked né alcun contatore della
-     * nuova generazione.
+     * Il contesto non può modificare le statistiche quando:
+     *
+     * - appartiene a una generazione precedente;
+     * - la propria sessione è già stata chiusa da DISABLE.
+     *
+     * Nel secondo caso la generazione può essere ancora uguale:
+     * il successivo ENABLE non è necessariamente già avvenuto.
      */
-    if (!same_generation)
+    if (!same_generation ||
+        !st_statistics.session_active) {
         goto out_unlock;
-
-    if (st_statistics.session_active) {
-        st_statistics_account_blocked_time_locked(
-            now_ns);
     }
+
+    st_statistics_account_blocked_time_locked(
+        now_ns);
 
     if (WARN_ON_ONCE(
             st_statistics.current_blocked == 0U)) {
