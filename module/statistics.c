@@ -375,28 +375,45 @@ out_unlock:
 }
 
 
-void st_statistics_record_relevant_invocation(void)
+u64 st_statistics_record_relevant_invocation(void)
 {
     unsigned long flags;
+    u64 generation;
+
+    generation = 0U;
 
     spin_lock_irqsave(
         &st_statistics_lock,
         flags);
 
     if (st_statistics.session_active) {
+        /*
+         * L'incremento e l'acquisizione del token avvengono
+         * sotto lo stesso lock.
+         *
+         * STATS_RESET non può quindi inserirsi tra le due
+         * operazioni e attribuire alla chiamata una generazione
+         * diversa da quella del relativo relevant counter.
+         */
         st_statistics.relevant_invocations =
             st_statistics_saturating_increment(
                 st_statistics.relevant_invocations);
+
+        generation =
+            st_statistics.generation;
     }
 
     spin_unlock_irqrestore(
         &st_statistics_lock,
         flags);
+
+    return generation;
 }
 
 
 bool st_statistics_block_begin(
     struct st_statistics_block_context *context,
+    u64 invocation_generation,
     unsigned int syscall_nr,
     kuid_t effective_uid,
     const char *program_name)
@@ -430,6 +447,20 @@ bool st_statistics_block_begin(
     if (!st_statistics.session_active)
         goto out_unlock;
 
+    /*
+     * Una syscall può entrare in THROTTLE soltanto nella stessa
+     * generazione nella quale era stata registrata come rilevante.
+     *
+     * Un RESET o un nuovo ENABLE intervenuto nel frattempo rende
+     * il token obsoleto e l'evento non viene attribuito alla nuova
+     * sessione.
+     */
+    if (invocation_generation == 0U ||
+        invocation_generation !=
+            st_statistics.generation) {
+        goto out_unlock;
+    }
+
     if (WARN_ON_ONCE(
             st_statistics.current_blocked ==
                 (u32)~0U)) {
@@ -452,7 +483,7 @@ bool st_statistics_block_begin(
             st_statistics.blocked_invocations);
 
     context->generation =
-        st_statistics.generation;
+        invocation_generation;
 
     context->start_ns = now_ns;
     context->counted = true;

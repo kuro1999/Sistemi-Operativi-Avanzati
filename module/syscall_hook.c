@@ -1073,6 +1073,7 @@ st_generic_syscall_wrapper(
         ST_PROGRAM_NAME_CAPACITY];
 
     u64 observed_generation;
+    u64 statistics_generation;
     unsigned long raw_syscall_nr;
     unsigned int syscall_nr;
 
@@ -1143,7 +1144,8 @@ st_generic_syscall_wrapper(
      * La chiamata rilevante viene contata una sola volta,
      * indipendentemente dai retry del rate limiter.
      */
-    st_statistics_record_relevant_invocation();
+    statistics_generation =
+        st_statistics_record_relevant_invocation();
 
     for (;;) {
         decision = st_rate_limiter_try_acquire(
@@ -1214,6 +1216,7 @@ st_generic_syscall_wrapper(
 
                 st_statistics_block_begin(
                     &statistics_context,
+                    statistics_generation,
                     syscall_nr,
                     blocked_euid,
                     statistics_program_name);

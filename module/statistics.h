@@ -69,8 +69,14 @@ void st_statistics_get_snapshot(
 
 /*
  * Registra una invocazione risultata rilevante per la policy.
+ *
+ * Restituisce il token della generazione nella quale
+ * relevant_invocations è stato incrementato.
+ *
+ * Il valore zero indica che nessuna sessione statistica era
+ * attiva al momento della registrazione.
  */
-void st_statistics_record_relevant_invocation(void);
+u64 st_statistics_record_relevant_invocation(void);
 
 /*
  * Registra il primo ingresso in THROTTLE di una invocazione.
@@ -80,6 +86,7 @@ void st_statistics_record_relevant_invocation(void);
  */
 bool st_statistics_block_begin(
     struct st_statistics_block_context *context,
+    u64 invocation_generation,
     unsigned int syscall_nr,
     kuid_t effective_uid,
     const char *program_name);
