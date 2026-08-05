@@ -1,7 +1,7 @@
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
-#include <linux/mutex.h>
+#include <linux/rwsem.h>
 #include <linux/slab.h>
 #include <linux/uidgid.h>
 #include <linux/user_namespace.h>
@@ -14,7 +14,7 @@ struct st_uid_entry {
 };
 
 static LIST_HEAD(st_uid_entries);
-static DEFINE_MUTEX(st_uid_registry_lock);
+static DECLARE_RWSEM(st_uid_registry_lock);
 static unsigned int st_uid_entries_count;
 
 void st_uid_registry_init(void)
@@ -30,7 +30,7 @@ void st_uid_registry_exit(void)
     struct st_uid_entry *entry;
     struct st_uid_entry *next;
 
-    mutex_lock(&st_uid_registry_lock);
+    down_write(&st_uid_registry_lock);
 
     list_for_each_entry_safe(entry, next, &st_uid_entries, node) {
         list_del(&entry->node);
@@ -39,7 +39,7 @@ void st_uid_registry_exit(void)
 
     st_uid_entries_count = 0U;
 
-    mutex_unlock(&st_uid_registry_lock);
+    up_write(&st_uid_registry_lock);
 
     pr_info("syscall_throttle: registro UID rilasciato\n");
 }
@@ -58,11 +58,11 @@ int st_uid_registry_add(kuid_t uid)
 
     new_entry->uid = uid;
 
-    mutex_lock(&st_uid_registry_lock);
+    down_write(&st_uid_registry_lock);
 
     list_for_each_entry(entry, &st_uid_entries, node) {
         if (uid_eq(entry->uid, uid)) {
-            mutex_unlock(&st_uid_registry_lock);
+            up_write(&st_uid_registry_lock);
             kfree(new_entry);
             return -EEXIST;
         }
@@ -71,7 +71,7 @@ int st_uid_registry_add(kuid_t uid)
     list_add_tail(&new_entry->node, &st_uid_entries);
     st_uid_entries_count++;
 
-    mutex_unlock(&st_uid_registry_lock);
+    up_write(&st_uid_registry_lock);
 
     return 0;
 }
@@ -85,7 +85,7 @@ int st_uid_registry_remove(kuid_t uid)
     if (!uid_valid(uid))
         return -EINVAL;
 
-    mutex_lock(&st_uid_registry_lock);
+    down_write(&st_uid_registry_lock);
 
     list_for_each_entry_safe(entry, next, &st_uid_entries, node) {
         if (uid_eq(entry->uid, uid)) {
@@ -96,7 +96,7 @@ int st_uid_registry_remove(kuid_t uid)
         }
     }
 
-    mutex_unlock(&st_uid_registry_lock);
+    up_write(&st_uid_registry_lock);
 
     if (removed_entry == NULL)
         return -ENOENT;
@@ -113,7 +113,7 @@ bool st_uid_registry_contains(kuid_t uid)
     if (!uid_valid(uid))
         return false;
 
-    mutex_lock(&st_uid_registry_lock);
+    down_read(&st_uid_registry_lock);
 
     list_for_each_entry(entry, &st_uid_entries, node) {
         if (uid_eq(entry->uid, uid)) {
@@ -122,7 +122,7 @@ bool st_uid_registry_contains(kuid_t uid)
         }
     }
 
-    mutex_unlock(&st_uid_registry_lock);
+    up_read(&st_uid_registry_lock);
 
     return found;
 }
@@ -131,9 +131,9 @@ unsigned int st_uid_registry_count(void)
 {
     unsigned int count;
 
-    mutex_lock(&st_uid_registry_lock);
+    down_read(&st_uid_registry_lock);
     count = st_uid_entries_count;
-    mutex_unlock(&st_uid_registry_lock);
+    up_read(&st_uid_registry_lock);
 
     return count;
 }
@@ -152,7 +152,7 @@ int st_uid_registry_snapshot(__u32 *uids,
     if (capacity != 0U && uids == NULL)
         return -EINVAL;
 
-    mutex_lock(&st_uid_registry_lock);
+    down_read(&st_uid_registry_lock);
 
     total = (__u32)st_uid_entries_count;
     *count = total;
@@ -162,7 +162,7 @@ int st_uid_registry_snapshot(__u32 *uids,
      * produrre una copia parziale del registro.
      */
     if (capacity < total) {
-        mutex_unlock(&st_uid_registry_lock);
+        up_read(&st_uid_registry_lock);
         return -ENOSPC;
     }
 
@@ -176,7 +176,7 @@ int st_uid_registry_snapshot(__u32 *uids,
          */
         numeric_uid = from_kuid(&init_user_ns, entry->uid);
         if (numeric_uid == (uid_t)-1) {
-            mutex_unlock(&st_uid_registry_lock);
+            up_read(&st_uid_registry_lock);
             return -EOVERFLOW;
         }
 
@@ -184,7 +184,7 @@ int st_uid_registry_snapshot(__u32 *uids,
         index++;
     }
 
-    mutex_unlock(&st_uid_registry_lock);
+    up_read(&st_uid_registry_lock);
 
     return 0;
 }

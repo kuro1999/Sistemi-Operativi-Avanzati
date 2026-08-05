@@ -1,7 +1,7 @@
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
-#include <linux/mutex.h>
+#include <linux/rwsem.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 
@@ -16,7 +16,7 @@ struct st_program_entry {
 };
 
 static LIST_HEAD(st_program_entries);
-static DEFINE_MUTEX(st_program_registry_lock);
+static DECLARE_RWSEM(st_program_registry_lock);
 static unsigned int st_program_entries_count;
 
 static int st_program_name_validate(const char *name)
@@ -62,7 +62,7 @@ void st_program_registry_exit(void)
     struct st_program_entry *entry;
     struct st_program_entry *next;
 
-    mutex_lock(&st_program_registry_lock);
+    down_write(&st_program_registry_lock);
 
     list_for_each_entry_safe(entry,
                              next,
@@ -74,7 +74,7 @@ void st_program_registry_exit(void)
 
     st_program_entries_count = 0U;
 
-    mutex_unlock(&st_program_registry_lock);
+    up_write(&st_program_registry_lock);
 
     pr_info("syscall_throttle: registro programmi rilasciato\n");
 }
@@ -101,11 +101,11 @@ int st_program_registry_add(const char *name)
             name,
             sizeof(new_entry->name));
 
-    mutex_lock(&st_program_registry_lock);
+    down_write(&st_program_registry_lock);
 
     list_for_each_entry(entry, &st_program_entries, node) {
         if (strcmp(entry->name, name) == 0) {
-            mutex_unlock(&st_program_registry_lock);
+            up_write(&st_program_registry_lock);
             kfree(new_entry);
             return -EEXIST;
         }
@@ -114,7 +114,7 @@ int st_program_registry_add(const char *name)
     list_add_tail(&new_entry->node, &st_program_entries);
     st_program_entries_count++;
 
-    mutex_unlock(&st_program_registry_lock);
+    up_write(&st_program_registry_lock);
 
     return 0;
 }
@@ -130,7 +130,7 @@ int st_program_registry_remove(const char *name)
     if (ret != 0)
         return ret;
 
-    mutex_lock(&st_program_registry_lock);
+    down_write(&st_program_registry_lock);
 
     list_for_each_entry_safe(entry,
                              next,
@@ -144,7 +144,7 @@ int st_program_registry_remove(const char *name)
         }
     }
 
-    mutex_unlock(&st_program_registry_lock);
+    up_write(&st_program_registry_lock);
 
     if (removed_entry == NULL)
         return -ENOENT;
@@ -161,7 +161,7 @@ bool st_program_registry_contains(const char *name)
     if (st_program_name_validate(name) != 0)
         return false;
 
-    mutex_lock(&st_program_registry_lock);
+    down_read(&st_program_registry_lock);
 
     list_for_each_entry(entry, &st_program_entries, node) {
         if (strcmp(entry->name, name) == 0) {
@@ -170,7 +170,7 @@ bool st_program_registry_contains(const char *name)
         }
     }
 
-    mutex_unlock(&st_program_registry_lock);
+    up_read(&st_program_registry_lock);
 
     return found;
 }
@@ -191,7 +191,7 @@ int st_program_registry_snapshot(struct st_program_name *programs,
     if (capacity != 0U && programs == NULL)
         return -EINVAL;
 
-    mutex_lock(&st_program_registry_lock);
+    down_read(&st_program_registry_lock);
 
     required = (__u32)st_program_entries_count;
     *count = required;
@@ -201,7 +201,7 @@ int st_program_registry_snapshot(struct st_program_name *programs,
      * produrre uno snapshot parziale.
      */
     if (capacity < required) {
-        mutex_unlock(&st_program_registry_lock);
+        up_read(&st_program_registry_lock);
         return -ENOSPC;
     }
 
@@ -221,14 +221,14 @@ int st_program_registry_snapshot(struct st_program_name *programs,
          * registro sono già stati validati all'inserimento.
          */
         if (copied < 0) {
-            mutex_unlock(&st_program_registry_lock);
+            up_read(&st_program_registry_lock);
             return -EOVERFLOW;
         }
 
         index++;
     }
 
-    mutex_unlock(&st_program_registry_lock);
+    up_read(&st_program_registry_lock);
     return 0;
 }
 
@@ -252,9 +252,9 @@ unsigned int st_program_registry_count(void)
 {
     unsigned int count;
 
-    mutex_lock(&st_program_registry_lock);
+    down_read(&st_program_registry_lock);
     count = st_program_entries_count;
-    mutex_unlock(&st_program_registry_lock);
+    up_read(&st_program_registry_lock);
 
     return count;
 }
