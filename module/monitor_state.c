@@ -1,41 +1,68 @@
-#include <linux/compiler.h>
+#include <linux/jump_label.h>
 #include <linux/kernel.h>
 
 #include "monitor_state.h"
 
 /*
- * Stato globale del monitor.
+ * Stato globale del monitor rappresentato tramite static key.
  *
- * La variabile resta privata a questo file: gli altri componenti
- * devono utilizzare le funzioni dichiarate in monitor_state.h.
+ * FALSE:
+ * il monitor è disattivato e i jump-label site seguono il
+ * percorso rapido.
+ *
+ * TRUE:
+ * il monitor è attivo e i jump-label site entrano nella policy.
  */
-static bool st_monitor_enabled; //static impedisce modifiche esterne lo vede solo il monitor per accedere devono usare l'api esposta
+DEFINE_STATIC_KEY_FALSE(st_monitor_enabled_key);
 
 void st_monitor_state_init(void)
 {
-    WRITE_ONCE(st_monitor_enabled, false);
+    /*
+     * DEFINE_STATIC_KEY_FALSE inizializza già la key come falsa.
+     * Non è necessario eseguire un aggiornamento del codice
+     * durante il caricamento del modulo.
+     */
     pr_info("syscall_throttle: monitor inizializzato come disattivato\n");
 }
 
 void st_monitor_state_exit(void)
 {
-    WRITE_ONCE(st_monitor_enabled, false);
+    /*
+     * Durante l'unload il monitor può essere ancora logicamente
+     * attivo. Ripristiniamo quindi la key falsa prima che il
+     * modulo venga definitivamente rimosso.
+     */
+    if (st_monitor_is_enabled())
+        static_branch_disable(
+            &st_monitor_enabled_key);
+
     pr_info("syscall_throttle: stato del monitor rilasciato\n");
 }
 
 void st_monitor_enable(void)
 {
-    WRITE_ONCE(st_monitor_enabled, true);
+    static_branch_enable(
+        &st_monitor_enabled_key);
+
     pr_info("syscall_throttle: monitor attivato\n");
 }
 
 void st_monitor_disable(void)
 {
-    WRITE_ONCE(st_monitor_enabled, false);
+    static_branch_disable(
+        &st_monitor_enabled_key);
+
     pr_info("syscall_throttle: monitor disattivato\n");
 }
 
 bool st_monitor_is_enabled(void)
 {
-    return READ_ONCE(st_monitor_enabled);
+    /*
+     * API generale usata dal control plane.
+     *
+     * I due fast path delle system call usano invece direttamente
+     * st_monitor_fast_path_enabled(), evitando questa chiamata.
+     */
+    return static_branch_unlikely(
+        &st_monitor_enabled_key);
 }

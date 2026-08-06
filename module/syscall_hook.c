@@ -609,7 +609,7 @@ static void notrace st_ftrace_callback(
      * registrata non serve eseguire classificazione, identity
      * matching o rate limiting.
      */
-    if (!st_monitor_is_enabled())
+    if (!st_monitor_fast_path_enabled())
         return;
 
     if (!st_syscall_registry_contains(syscall_nr))
@@ -763,7 +763,7 @@ static bool st_syscall_is_relevant(
         program_name[0] = '\0';
     }
 
-    if (!st_monitor_is_enabled()) {
+    if (!st_monitor_fast_path_enabled()) {
         atomic64_inc(&st_hook_monitor_disabled_calls);
         return false;
     }
