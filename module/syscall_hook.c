@@ -1085,10 +1085,15 @@ st_generic_syscall_wrapper(
     int identity_ret;
     int wait_ret;
 
-    memset(
-        &statistics_context,
-        0,
-        sizeof(statistics_context));
+    /*
+     * Il contesto statistico viene inizializzato in modo lazy.
+     *
+     * Finché la syscall non riceve il primo THROTTLE serve
+     * soltanto sapere che nessun blocco è stato contabilizzato.
+     * st_statistics_block_begin() inizializzerà completamente
+     * la struttura quando il contesto diventerà necessario.
+     */
+    statistics_context.counted = false;
 
     statistics_program_name[0] = '\0';
     statistics_program_name_valid = false;
@@ -1161,11 +1166,13 @@ st_generic_syscall_wrapper(
              * Se esiste un contesto bloccato, la misura termina
              * immediatamente prima della syscall originale.
              *
-             * Per una chiamata ammessa subito la funzione è
-             * intenzionalmente un no-op.
+             * Una chiamata mai entrata in THROTTLE non possiede
+             * invece alcun contesto statistico da completare.
              */
-            st_statistics_block_complete(
-                &statistics_context);
+            if (statistics_context.counted) {
+                st_statistics_block_complete(
+                    &statistics_context);
+            }
 
             result = st_call_original_syscall(
                 target,
@@ -1235,8 +1242,10 @@ st_generic_syscall_wrapper(
                  * L'attesa viene registrata come interrotta e
                  * non contribuisce al peak delay.
                  */
-                st_statistics_block_interrupted(
-                    &statistics_context);
+                if (statistics_context.counted) {
+                    st_statistics_block_interrupted(
+                        &statistics_context);
+                }
 
                 result = wait_ret;
                 goto out;
