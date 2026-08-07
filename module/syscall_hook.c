@@ -492,6 +492,7 @@ st_generic_syscall_wrapper(
  * Esegue quindi soltanto controlli lockless e non bloccanti:
  *
  * - evita la ricorsione quando il wrapper richiama l'originale;
+ * - esce immediatamente quando il monitor è disattivato;
  * - valida il percorso syscall nativo x86-64;
  * - scarta delete_module e le chiamate non registrate;
  * - trasporta l'indirizzo originale nel secondo argomento;
@@ -518,6 +519,14 @@ static void notrace st_ftrace_callback(
      * deve lasciare proseguire la vera funzione __x64_sys_*.
      */
     if (within_module(parent_ip, THIS_MODULE))
+        return;
+
+    /*
+     * Il monitor disattivato è il caso più economico:
+     * la static key permette di uscire prima di recuperare
+     * e validare il frame pt_regs della system call.
+     */
+    if (!st_monitor_fast_path_enabled())
         return;
 
     /*
@@ -569,9 +578,9 @@ static void notrace st_ftrace_callback(
     /*
      * Il callback deve evitare di creare wrapper inutili.
      *
-     * monitor_state e syscall_registry espongono letture
-     * lockless e non bloccanti, quindi possono essere consultati
-     * prima del redirect Ftrace.
+     * Il registro delle syscall espone una lettura lockless e
+     * non bloccante, quindi può essere consultato prima del
+     * redirect Ftrace.
      */
     raw_syscall_nr =
         READ_ONCE(syscall_regs->orig_ax);
@@ -605,13 +614,9 @@ static void notrace st_ftrace_callback(
         return;
 
     /*
-     * Con il monitor spento oppure con una syscall non
-     * registrata non serve eseguire classificazione, identity
-     * matching o rate limiting.
+     * Con una syscall non registrata non serve eseguire
+     * classificazione, identity matching o rate limiting.
      */
-    if (!st_monitor_fast_path_enabled())
-        return;
-
     if (!st_syscall_registry_contains(syscall_nr))
         return;
 
