@@ -49,6 +49,11 @@ struct st_statistics_state {
     bool peak_valid;
 };
 
+/*
+ * I timestamp usati per aggiornare o fotografare lo stato condiviso
+ * vengono acquisiti sotto questo lock: l'ordine temporale deve
+ * coincidere con l'ordine degli aggiornamenti, anche tra CPU diverse.
+ */
 static DEFINE_SPINLOCK(st_statistics_lock);
 static struct st_statistics_state st_statistics;
 
@@ -217,11 +222,11 @@ void st_statistics_session_start(void)
     u64 generation;
     u64 now_ns;
 
-    now_ns = ktime_get_ns();
-
     spin_lock_irqsave(
         &st_statistics_lock,
         flags);
+
+    now_ns = ktime_get_ns();
 
     st_statistics_reset_session_locked(
         now_ns,
@@ -259,7 +264,6 @@ void st_statistics_session_stop(void)
     u32 released_blocked;
     bool stopped;
 
-    now_ns = ktime_get_ns();
     generation = 0U;
     released_blocked = 0U;
     stopped = false;
@@ -267,6 +271,8 @@ void st_statistics_session_stop(void)
     spin_lock_irqsave(
         &st_statistics_lock,
         flags);
+
+    now_ns = ktime_get_ns();
 
     if (st_statistics.session_active) {
         /*
@@ -328,7 +334,6 @@ int st_statistics_reset(void)
     bool session_active;
     int ret;
 
-    now_ns = ktime_get_ns();
     generation = 0U;
     session_active = false;
     ret = 0;
@@ -336,6 +341,8 @@ int st_statistics_reset(void)
     spin_lock_irqsave(
         &st_statistics_lock,
         flags);
+
+    now_ns = ktime_get_ns();
 
     /*
      * Ogni waiter conserva la generazione e una reference logica
@@ -437,12 +444,13 @@ bool st_statistics_block_begin(
             sizeof(context->program_name));
     }
 
-    now_ns = ktime_get_ns();
     counted = false;
 
     spin_lock_irqsave(
         &st_statistics_lock,
         flags);
+
+    now_ns = ktime_get_ns();
 
     if (!st_statistics.session_active)
         goto out_unlock;
@@ -528,15 +536,16 @@ static void st_statistics_block_finish(
         return;
     }
 
+    spin_lock_irqsave(
+        &st_statistics_lock,
+        flags);
+
     now_ns = ktime_get_ns();
+
     delay_ns = 0U;
 
     if (now_ns >= context->start_ns)
         delay_ns = now_ns - context->start_ns;
-
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
 
     same_generation =
         context->generation ==
@@ -643,13 +652,13 @@ void st_statistics_get_snapshot(
     if (snapshot == NULL)
         return;
 
-    now_ns = ktime_get_ns();
-
     memset(snapshot, 0, sizeof(*snapshot));
 
     spin_lock_irqsave(
         &st_statistics_lock,
         flags);
+
+    now_ns = ktime_get_ns();
 
     if (st_statistics.session_active) {
         st_statistics_account_blocked_time_locked(
