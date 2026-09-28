@@ -421,6 +421,7 @@ u64 st_statistics_record_relevant_invocation(void)
 bool st_statistics_block_begin(
     struct st_statistics_block_context *context,
     u64 invocation_generation,
+    u64 throttle_start_ns,
     unsigned int syscall_nr,
     kuid_t effective_uid,
     const char *program_name)
@@ -493,7 +494,8 @@ bool st_statistics_block_begin(
     context->generation =
         invocation_generation;
 
-    context->start_ns = now_ns;
+    /* Il delay parte dalla decisione; la contabilita usa now_ns. */
+    context->start_ns = throttle_start_ns;
     context->counted = true;
 
     counted = true;

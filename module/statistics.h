@@ -80,6 +80,8 @@ u64 st_statistics_record_relevant_invocation(void);
 
 /*
  * Registra il primo ingresso in THROTTLE di una invocazione.
+ * throttle_start_ns proviene dalla prima decisione del limiter;
+ * il tempo contabile viene acquisito separatamente sotto lock.
  *
  * Restituisce true se la chiamata è stata associata alla
  * sessione statistica corrente.
@@ -87,6 +89,7 @@ u64 st_statistics_record_relevant_invocation(void);
 bool st_statistics_block_begin(
     struct st_statistics_block_context *context,
     u64 invocation_generation,
+    u64 throttle_start_ns,
     unsigned int syscall_nr,
     kuid_t effective_uid,
     const char *program_name);

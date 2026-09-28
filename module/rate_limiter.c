@@ -1,5 +1,6 @@
 #include <linux/errno.h>
 #include <linux/jiffies.h>
+#include <linux/ktime.h>
 #include <linux/printk.h>
 #include <linux/spinlock.h>
 #include <linux/timer.h>
@@ -159,7 +160,9 @@ void st_rate_limiter_stop(void)
 }
 
 enum st_rate_limiter_decision
-st_rate_limiter_try_acquire(u64 *window_generation)
+st_rate_limiter_try_acquire(
+    u64 *window_generation,
+    u64 *throttle_start_ns)
 {
     enum st_rate_limiter_decision decision;
 
@@ -203,6 +206,8 @@ st_rate_limiter_try_acquire(u64 *window_generation)
 
     } else {
         decision = ST_RATE_LIMITER_THROTTLE;
+        if (throttle_start_ns != NULL)
+            *throttle_start_ns = ktime_get_ns();
     }
 
     spin_unlock_bh(&st_rate_limiter.lock);

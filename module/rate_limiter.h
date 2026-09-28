@@ -34,9 +34,15 @@ void st_rate_limiter_stop(void);
  * window_generation viene valorizzata con la generazione osservata.
  * Questo valore servirà successivamente ai thread in attesa per
  * riconoscere l'apertura di una nuova finestra.
+ *
+ * throttle_start_ns, se non NULL, riceve il timestamp della
+ * decisione THROTTLE sotto il lock del limiter. Negli altri
+ * casi non viene scritto e il chiamante non deve leggerlo.
  */
 enum st_rate_limiter_decision
-st_rate_limiter_try_acquire(u64 *window_generation);
+st_rate_limiter_try_acquire(
+    u64 *window_generation,
+    u64 *throttle_start_ns);
 
 /*
  * Attende in modo interrompibile che lo stato osservato dal

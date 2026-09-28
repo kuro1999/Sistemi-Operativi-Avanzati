@@ -1078,6 +1078,7 @@ st_generic_syscall_wrapper(
         ST_PROGRAM_NAME_CAPACITY];
 
     u64 observed_generation;
+    u64 throttle_start_ns = 0U;
     u64 statistics_generation;
     unsigned long raw_syscall_nr;
     unsigned int syscall_nr;
@@ -1159,7 +1160,8 @@ st_generic_syscall_wrapper(
 
     for (;;) {
         decision = st_rate_limiter_try_acquire(
-            &observed_generation);
+            &observed_generation,
+            first_throttle_seen ? NULL : &throttle_start_ns);
 
         st_record_rate_limiter_decision(decision);
 
@@ -1229,6 +1231,7 @@ st_generic_syscall_wrapper(
                 st_statistics_block_begin(
                     &statistics_context,
                     statistics_generation,
+                    throttle_start_ns,
                     syscall_nr,
                     blocked_euid,
                     statistics_program_name);
