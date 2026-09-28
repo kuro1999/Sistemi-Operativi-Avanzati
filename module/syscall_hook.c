@@ -819,6 +819,20 @@ static bool st_syscall_is_relevant(
 }
 
 
+/* Rivalutazione senza modificare i contatori diagnostici. */
+static bool st_syscall_policy_still_matches(unsigned int syscall_nr)
+{
+    char name[ST_PROGRAM_NAME_CAPACITY];
+
+    if (!st_monitor_fast_path_enabled() ||
+        !st_syscall_registry_contains(syscall_nr))
+        return false;
+    if (st_uid_registry_contains(current_euid()))
+        return true;
+    return st_program_get_current_name(name, sizeof(name)) == 0 &&
+           st_program_registry_contains(name);
+}
+
 /*
  * Registra ogni decisione presa dal rate limiter.
  *
@@ -830,6 +844,8 @@ static void st_record_rate_limiter_decision(
     enum st_rate_limiter_decision decision)
 {
     switch (decision) {
+    case ST_RATE_LIMITER_RETRY:
+        break;
     case ST_RATE_LIMITER_BYPASS:
         atomic64_inc(&st_hook_rate_bypass_calls);
         break;
@@ -1159,13 +1175,23 @@ st_generic_syscall_wrapper(
         st_statistics_record_relevant_invocation();
 
     for (;;) {
-        decision = st_rate_limiter_try_acquire(
-            &observed_generation,
-            first_throttle_seen ? NULL : &throttle_start_ns);
+        /* Il token precede i registry; nessun lock resta acquisito. */
+        observed_generation = st_rate_limiter_get_generation();
+        if (!st_syscall_policy_still_matches(syscall_nr)) {
+            decision = ST_RATE_LIMITER_BYPASS;
+        } else {
+            decision = st_rate_limiter_try_acquire(
+                observed_generation,
+                &observed_generation,
+                first_throttle_seen ? NULL : &throttle_start_ns);
+        }
 
         st_record_rate_limiter_decision(decision);
 
         switch (decision) {
+        case ST_RATE_LIMITER_RETRY:
+            continue;
+
         case ST_RATE_LIMITER_ALLOW:
         case ST_RATE_LIMITER_BYPASS:
         case ST_RATE_LIMITER_SHUTDOWN:

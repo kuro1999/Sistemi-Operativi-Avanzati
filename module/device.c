@@ -747,7 +747,7 @@ static long st_ioctl_stats_get(unsigned long argument)
 }
 
 
-static long st_device_ioctl(struct file *file,
+static long st_device_ioctl_dispatch(struct file *file,
                             unsigned int command,
                             unsigned long argument)
 {
@@ -1335,6 +1335,31 @@ static long st_device_ioctl(struct file *file,
     default:
         return -ENOTTY;
     }
+}
+
+/* Al ritorno del dispatcher i lock dei registry sono rilasciati. */
+static long st_device_ioctl(struct file *file,
+                            unsigned int command,
+                            unsigned long argument)
+{
+    long ret = st_device_ioctl_dispatch(file, command, argument);
+
+    if (ret != 0)
+        return ret;
+
+    switch (command) {
+    case ST_IOCTL_UID_ADD:
+    case ST_IOCTL_UID_REMOVE:
+    case ST_IOCTL_PROGRAM_ADD:
+    case ST_IOCTL_PROGRAM_REMOVE:
+    case ST_IOCTL_SYSCALL_ADD:
+    case ST_IOCTL_SYSCALL_REMOVE:
+        st_rate_limiter_policy_changed();
+        break;
+    default:
+        break;
+    }
+    return ret;
 }
 
 static const struct file_operations st_file_operations = {

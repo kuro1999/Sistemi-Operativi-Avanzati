@@ -159,8 +159,26 @@ void st_rate_limiter_stop(void)
         pr_info("syscall_throttle: rate limiter arrestato\n");
 }
 
+u64 st_rate_limiter_get_generation(void)
+{
+    u64 generation;
+    spin_lock_bh(&st_rate_limiter.lock);
+    generation = st_rate_limiter.generation;
+    spin_unlock_bh(&st_rate_limiter.lock);
+    return generation;
+}
+
+void st_rate_limiter_policy_changed(void)
+{
+    spin_lock_bh(&st_rate_limiter.lock);
+    st_rate_limiter.generation++;
+    spin_unlock_bh(&st_rate_limiter.lock);
+    wake_up_all(&st_rate_limiter.wait_queue);
+}
+
 enum st_rate_limiter_decision
 st_rate_limiter_try_acquire(
+    u64 expected_generation,
     u64 *window_generation,
     u64 *throttle_start_ns)
 {
@@ -199,6 +217,9 @@ st_rate_limiter_try_acquire(
      * Incrementiamo soltanto le richieste realmente ammesse.
      * Il contatore non supera mai MAX.
      */
+    } else if (expected_generation != st_rate_limiter.generation) {
+        decision = ST_RATE_LIMITER_RETRY;
+
     } else if (st_rate_limiter.admitted <
                st_rate_limiter.max_invocations) {
         st_rate_limiter.admitted++;

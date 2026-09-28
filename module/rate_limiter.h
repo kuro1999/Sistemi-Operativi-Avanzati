@@ -8,6 +8,7 @@ enum st_rate_limiter_decision {
     ST_RATE_LIMITER_ALLOW,
     ST_RATE_LIMITER_THROTTLE,
     ST_RATE_LIMITER_SHUTDOWN,
+    ST_RATE_LIMITER_RETRY,
 };
 
 void st_rate_limiter_init(void);
@@ -28,8 +29,15 @@ int st_rate_limiter_start(void);
  */
 void st_rate_limiter_stop(void);
 
+/* Leggere la generazione PRIMA di rivalutare la policy. */
+u64 st_rate_limiter_get_generation(void);
+/* Notifica i registry senza azzerare budget o cambiare scadenza. */
+void st_rate_limiter_policy_changed(void);
+
 /*
  * Prova a consumare una unità del budget della finestra corrente.
+ *
+ * Una expected_generation obsoleta produce RETRY senza consumo di budget.
  *
  * window_generation viene valorizzata con la generazione osservata.
  * Questo valore servirà successivamente ai thread in attesa per
@@ -41,6 +49,7 @@ void st_rate_limiter_stop(void);
  */
 enum st_rate_limiter_decision
 st_rate_limiter_try_acquire(
+    u64 expected_generation,
     u64 *window_generation,
     u64 *throttle_start_ns);
 
@@ -52,6 +61,7 @@ st_rate_limiter_try_acquire(
  *
  * - si apre una nuova finestra;
  * - viene modificato MAX;
+ * - cambia un registro della policy;
  * - il rate limiter viene arrestato da DISABLE;
  * - il componente entra in teardown.
  *
