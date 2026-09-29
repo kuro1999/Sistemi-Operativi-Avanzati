@@ -21,6 +21,7 @@
 #include <linux/types.h>
 #include <linux/wait.h>
 
+#include "device.h"
 #include "monitor_state.h"
 #include "program_identity.h"
 #include "program_registry.h"
@@ -1148,6 +1149,20 @@ st_generic_syscall_wrapper(
         (st_x64_syscall_t)original_ip;
 
     atomic64_inc(&st_hook_total_calls);
+
+    /*
+     * Process context: prima di policy, budget e statistiche.
+     * L'helper esegue la richiesta sul file verificato, senza
+     * bypassare LSM o i controlli dei privilegi nel driver.
+     */
+    if (syscall_nr == (unsigned int)__NR_ioctl &&
+        st_device_try_control_ioctl(
+            (unsigned int)regs->di,
+            (unsigned int)regs->si,
+            (unsigned long)regs->dx,
+            &result)) {
+        goto out;
+    }
 
     /*
      * La classificazione può restituire anche il basename già

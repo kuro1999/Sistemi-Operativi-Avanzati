@@ -9,7 +9,8 @@ LDLIBS += -pthread
 TARGETS := \
     policy_transition_stress \
     syscall_hook_smoke \
-    syscall_hook_signal
+    syscall_hook_signal \
+    control_ioctl_regression
 
 .PHONY: all clean
 

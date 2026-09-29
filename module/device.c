@@ -1,6 +1,8 @@
 #include <linux/cred.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
+#include <linux/file.h>
+#include <linux/security.h>
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -1368,6 +1370,76 @@ static const struct file_operations st_file_operations = {
     .release = st_device_release,
     .unlocked_ioctl = st_device_ioctl,
 };
+
+/*
+ * Allowlist esatta: il solo magic non basta a identificare un comando.
+ * I comandi generici ioctl continuano a seguire il percorso ordinario.
+ */
+static bool st_device_is_control_command(unsigned int command)
+{
+    switch (command) {
+    case ST_IOCTL_PING:
+    case ST_IOCTL_ENABLE:
+    case ST_IOCTL_DISABLE:
+    case ST_IOCTL_GET_STATUS:
+    case ST_IOCTL_UID_ADD:
+    case ST_IOCTL_UID_REMOVE:
+    case ST_IOCTL_UID_GET_COUNT:
+    case ST_IOCTL_UID_LIST:
+    case ST_IOCTL_PROGRAM_ADD:
+    case ST_IOCTL_PROGRAM_REMOVE:
+    case ST_IOCTL_PROGRAM_GET_COUNT:
+    case ST_IOCTL_PROGRAM_LIST:
+    case ST_IOCTL_SYSCALL_ADD:
+    case ST_IOCTL_SYSCALL_REMOVE:
+    case ST_IOCTL_SYSCALL_GET_COUNT:
+    case ST_IOCTL_SYSCALL_LIST:
+    case ST_IOCTL_MAX_SET:
+    case ST_IOCTL_MAX_GET:
+    case ST_IOCTL_STATS_GET:
+    case ST_IOCTL_STATS_RESET:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool st_device_try_control_ioctl(unsigned int fd, unsigned int command,
+                                 unsigned long argument, long *result)
+{
+    struct file *file;
+    long ret;
+
+    if (result == NULL || !st_device_is_control_command(command))
+        return false;
+
+    file = fget(fd);
+    if (file == NULL)
+        return false;
+
+    if (file->f_op != &st_file_operations) {
+        fput(file);
+        return false;
+    }
+
+    /*
+     * Il file verificato e quello usato devono essere lo stesso oggetto.
+     * Richiamare la syscall per numero di fd consentirebbe una nuova
+     * risoluzione dopo un close/dup2 concorrente.
+     *
+     * Questi comandi privati non richiedono il dispatch delle ioctl
+     * generiche del VFS. Manteniamo il controllo LSM prima dell'handler.
+     */
+    ret = security_file_ioctl(file, command, argument);
+    if (ret == 0)
+        ret = st_device_ioctl(file, command, argument);
+    if (ret == -ENOIOCTLCMD)
+        ret = -ENOTTY;
+
+    fput(file);
+    *result = ret;
+    return true;
+}
 
 static struct miscdevice st_misc_device = {
     .minor = MISC_DYNAMIC_MINOR,

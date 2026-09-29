@@ -225,6 +225,12 @@ struct st_statistics_snapshot {
 };
 
 /*
+ * Le ioctl ST_IOCTL_* riconosciute, dirette al nostro device, sono
+ * escluse dal throttling. Controlli LSM e privilegi restano applicati.
+ * L'eccezione non comprende apertura del device o avvio del controller.
+ */
+
+/*
  * Comando minimale usato per verificare la comunicazione con il driver.
  */
 #define ST_IOCTL_PING \
