@@ -42,9 +42,10 @@ void st_statistics_session_start(void);
 /*
  * Chiude e congela la sessione corrente.
  *
- * Il tempo dei waiter viene contabilizzato fino all'istante di
- * chiusura. Gli eventi successivi dei waiter rilasciati non
- * modificano più lo snapshot conservato.
+ * Chiamare dopo l'arresto del limiter e il risveglio dei waiter.
+ * Attende la fine delle attese contabilizzate, includendone i ritardi,
+ * poi congela lo snapshot. Non attende le syscall originali.
+ * Il chiamante deve serializzare ENABLE e RESET con la chiusura.
  */
 void st_statistics_session_stop(void);
 

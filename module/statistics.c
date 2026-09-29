@@ -6,6 +6,8 @@
 #include <linux/string.h>
 #include <linux/uidgid.h>
 #include <linux/user_namespace.h>
+#include <linux/sched.h>
+#include <linux/wait.h>
 
 #include "statistics.h"
 
@@ -19,6 +21,7 @@ struct st_statistics_state {
     u64 generation;
 
     bool session_active;
+    bool session_closing;
 
     u64 session_start_ns;
     u64 session_stop_ns;
@@ -56,6 +59,7 @@ struct st_statistics_state {
  */
 static DEFINE_SPINLOCK(st_statistics_lock);
 static struct st_statistics_state st_statistics;
+static DECLARE_WAIT_QUEUE_HEAD(st_statistics_drain_queue);
 
 
 static u64 st_statistics_saturating_add(
@@ -245,84 +249,56 @@ void st_statistics_session_start(void)
 }
 
 
+/* Lettura protetta della condizione della wait queue. */
+static bool st_statistics_waiters_drained(void)
+{
+    unsigned long flags;
+    bool drained;
+
+    spin_lock_irqsave(&st_statistics_lock, flags);
+    drained = st_statistics.current_blocked == 0U;
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
+    return drained;
+}
+
 /*
- * Chiude definitivamente la sessione statistica corrente.
- *
- * Il punto di congelamento è protetto da st_statistics_lock.
- * Tutto ciò che è stato completato prima di questo punto resta
- * visibile; gli eventi successivi dei waiter ancora presenti
- * vengono ignorati.
- *
- * Il tempo pesato dei waiter viene prima integrato fino a now_ns.
- * Soltanto dopo current_blocked viene portato a zero.
+ * Il chiamante ha gia' fermato il limiter e risvegliato i waiter.
+ * ENABLE e RESET devono essere serializzati con questa funzione.
+ * Aspettiamo la fine delle attese contabilizzate, non delle syscall
+ * originali: block_complete() precede la loro esecuzione.
  */
 void st_statistics_session_stop(void)
 {
     unsigned long flags;
-    u64 generation;
+    u64 generation = 0U;
     u64 now_ns;
-    u32 released_blocked;
-    bool stopped;
+    bool stopped = false;
 
-    generation = 0U;
-    released_blocked = 0U;
-    stopped = false;
+    spin_lock_irqsave(&st_statistics_lock, flags);
+    if (st_statistics.session_active)
+        st_statistics.session_closing = true;
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
+    /* Nessuno spinlock resta acquisito durante l'attesa. */
+    wait_event(st_statistics_drain_queue,
+               st_statistics_waiters_drained());
 
+    spin_lock_irqsave(&st_statistics_lock, flags);
     now_ns = ktime_get_ns();
-
     if (st_statistics.session_active) {
-        /*
-         * Account finale:
-         *
-         * blocked_thread_time_ns +=
-         *     current_blocked *
-         *     (now_ns - last_blocked_change_ns)
-         */
-        st_statistics_account_blocked_time_locked(
-            now_ns);
-
-        st_statistics.session_stop_ns =
-            now_ns;
-
-        st_statistics.last_blocked_change_ns =
-            now_ns;
-
-        released_blocked =
-            st_statistics.current_blocked;
-
-        /*
-         * Dal punto di vista dello snapshot non esistono più
-         * waiter appartenenti a una sessione ormai chiusa.
-         *
-         * I relativi contesti locali rimangono validi sullo
-         * stack dei wrapper, ma block_finish() li disarmerà
-         * senza modificare i contatori.
-         */
-        st_statistics.current_blocked = 0U;
-
+        st_statistics_account_blocked_time_locked(now_ns);
+        st_statistics.session_stop_ns = now_ns;
+        st_statistics.last_blocked_change_ns = now_ns;
         st_statistics.session_active = false;
-
-        generation =
-            st_statistics.generation;
-
+        generation = st_statistics.generation;
         stopped = true;
     }
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 
-    spin_unlock_irqrestore(
-        &st_statistics_lock,
-        flags);
-
-    if (stopped) {
-        pr_info("syscall_throttle: sessione statistiche "
-                "arrestata: generazione=%llu, "
-                "waiter_congelati=%u\n",
-                (unsigned long long)generation,
-                released_blocked);
-    }
+    if (stopped)
+        pr_info("syscall_throttle: sessione statistiche arrestata: "
+                "generazione=%llu, waiter_residui=0\n",
+                (unsigned long long)generation);
 }
 
 
@@ -351,7 +327,8 @@ int st_statistics_reset(void)
      * Cambiare sessione mentre questi contesti sono attivi
      * renderebbe ambiguo il reset esplicito.
      */
-    if (st_statistics.current_blocked != 0U) {
+    if (st_statistics.current_blocked != 0U ||
+        (st_statistics.session_active && st_statistics.session_closing)) {
         ret = -EBUSY;
         goto out_unlock;
     }
@@ -393,7 +370,7 @@ u64 st_statistics_record_relevant_invocation(void)
         &st_statistics_lock,
         flags);
 
-    if (st_statistics.session_active) {
+    if (st_statistics.session_active && !st_statistics.session_closing) {
         /*
          * L'incremento e l'acquisizione del token avvengono
          * sotto lo stesso lock.
@@ -453,7 +430,7 @@ bool st_statistics_block_begin(
 
     now_ns = ktime_get_ns();
 
-    if (!st_statistics.session_active)
+    if (!st_statistics.session_active || st_statistics.session_closing)
         goto out_unlock;
 
     /*
@@ -532,6 +509,7 @@ static void st_statistics_block_finish(
     u64 delay_ns;
     u64 now_ns;
     bool same_generation;
+    bool wake_drain = false;
 
     if (context == NULL ||
         !context->counted) {
@@ -576,6 +554,8 @@ static void st_statistics_block_finish(
     }
 
     st_statistics.current_blocked--;
+    wake_drain = st_statistics.session_closing &&
+                 st_statistics.current_blocked == 0U;
 
     if (interrupted) {
         st_statistics.interrupted_blocked_invocations =
@@ -623,6 +603,8 @@ out_unlock:
      * deve essere disarmato prima dell'uscita dal wrapper.
      */
     context->counted = false;
+    if (wake_drain)
+        wake_up_all(&st_statistics_drain_queue);
 }
 
 
