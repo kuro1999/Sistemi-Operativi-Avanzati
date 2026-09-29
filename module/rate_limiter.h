@@ -76,8 +76,9 @@ int st_rate_limiter_wait_for_change(
  * Imposta il numero massimo di invocazioni ammesse
  * in una finestra globale di un secondo.
  *
- * La modifica apre una nuova generazione logica e
- * azzera il numero di invocazioni già ammesse.
+ * Conserva le ammissioni gia' effettuate e la scadenza corrente.
+ * Se il valore cambia, aggiorna la generazione e risveglia i waiter
+ * per rivalutare il budget. Lo stesso valore non modifica lo stato.
  */
 void st_rate_limiter_set_max(u64 max_invocations);
 

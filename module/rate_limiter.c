@@ -215,7 +215,8 @@ st_rate_limiter_try_acquire(
 
     /*
      * Incrementiamo soltanto le richieste realmente ammesse.
-     * Il contatore non supera mai MAX.
+     * Una riduzione di MAX puo' lasciare admitted sopra il nuovo limite:
+     * in tal caso non ammettiamo altre chiamate fino al rinnovo del budget.
      */
     } else if (expected_generation != st_rate_limiter.generation) {
         decision = ST_RATE_LIMITER_RETRY;
@@ -281,30 +282,26 @@ int st_rate_limiter_wait_for_change(
 
 void st_rate_limiter_set_max(u64 max_invocations)
 {
+    bool changed = false;
+
     spin_lock_bh(&st_rate_limiter.lock);
 
-    st_rate_limiter.max_invocations = max_invocations;
-    st_rate_limiter.admitted = 0U;
-    st_rate_limiter.generation++;
-
     /*
-     * Se il monitor è già in funzione, il cambio di MAX
-     * avvia una nuova finestra completa di un secondo.
-     *
-     * mod_timer() modifica la scadenza del timer già armato
-     * oppure lo arma nuovamente se necessario.
+     * Conserviamo ammissioni e scadenza della finestra corrente.
+     * Un aumento rende disponibile soltanto il budget aggiuntivo;
+     * una riduzione non annulla le ammissioni gia' effettuate.
+     * Reimpostare lo stesso valore non modifica lo stato.
      */
-    if (st_rate_limiter.running &&
-        !st_rate_limiter.stopping) {
-        st_rate_limiter.next_expiry = jiffies + HZ;
-
-        mod_timer(&st_rate_limiter.window_timer,
-                  st_rate_limiter.next_expiry);
+    if (st_rate_limiter.max_invocations != max_invocations) {
+        st_rate_limiter.max_invocations = max_invocations;
+        st_rate_limiter.generation++;
+        changed = true;
     }
 
     spin_unlock_bh(&st_rate_limiter.lock);
 
-    wake_up_all(&st_rate_limiter.wait_queue);
+    if (changed)
+        wake_up_all(&st_rate_limiter.wait_queue);
 }
 
 u64 st_rate_limiter_get_max(void)
