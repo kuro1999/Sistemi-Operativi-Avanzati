@@ -57,8 +57,9 @@ def run_case(initial, new, waiting):
               "INCONCLUDENTE: MAX_SET troppo tardivo; ripetere")
 
         released = min(waiting, max(0, new - initial))
+        # La nuova sessione include soltanto i waiter trasferiti.
         expected = (
-            total, waiting, released, 0, waiting - released, waiting
+            waiting, waiting, released, 0, waiting - released, waiting
         )
 
         # Attendiamo l'effetto dell'eventuale aumento, restando
@@ -95,7 +96,7 @@ def run_case(initial, new, waiting):
         for worker in workers:
             check(worker.wait(timeout=4) == 0, "Worker fallito")
         text, _, counts, _ = snapshot(total)
-        check(counts == (total, waiting, waiting, 0, 0, waiting), text)
+        check(counts == (waiting, waiting, waiting, 0, 0, waiting), text)
         print("PASS: tutti i worker completati senza ulteriori modifiche",
               flush=True)
     finally:

@@ -40,6 +40,13 @@ void st_statistics_exit(void);
 void st_statistics_session_start(void);
 
 /*
+ * Chiamare sotto il lock del limiter per un effettivo cambio di MAX.
+ * Apre una nuova osservazione trasferendo i waiter; a monitor OFF
+ * conserva lo snapshot. Non attende e non acquisisce lock del limiter.
+ */
+void st_statistics_max_changed(void);
+
+/*
  * Chiude e congela la sessione corrente.
  *
  * Chiamare dopo l'arresto del limiter e il risveglio dei waiter.

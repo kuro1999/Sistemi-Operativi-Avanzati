@@ -8,6 +8,7 @@
 #include <linux/wait.h>
 
 #include "rate_limiter.h"
+#include "statistics.h"
 
 struct st_rate_limiter_state {
     spinlock_t lock;
@@ -294,6 +295,8 @@ void st_rate_limiter_set_max(u64 max_invocations)
      */
     if (st_rate_limiter.max_invocations != max_invocations) {
         st_rate_limiter.max_invocations = max_invocations;
+        /* Nuova sessione pronta prima di nuove ammissioni e wake-up. */
+        st_statistics_max_changed();
         st_rate_limiter.generation++;
         changed = true;
     }

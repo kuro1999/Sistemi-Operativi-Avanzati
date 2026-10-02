@@ -115,7 +115,7 @@ def run(binary):
         check(worker.wait(timeout=3) == 0,
               "Worker terminato con errore")
 
-        report = wait_counts((2, 2, 1, 1, 0, 1))
+        report = wait_counts((1, 1, 1, 0, 0, 1))
         check(not select.select([read_fd], [], [], 0)[0],
               "Il byte non e' stato consumato")
 

@@ -42,13 +42,24 @@ def snapshot(n):
 def run_case(n):
     workers = []
     stop = threading.Event()
+    # Pari: sessione stabile. Dispari: MAX_SET in corso.
+    phase = 0
 
     def reader():
-        previous, count = -1.0, 0
+        previous, previous_phase, count = -1.0, -1, 0
         while not stop.is_set():
+            before = phase
             _, _, _, elapsed = snapshot(n)
-            assert elapsed >= previous, "Tempo di osservazione retrogrado"
-            previous, count = elapsed, count + 1
+            after = phase
+            # Gli invarianti di snapshot valgono anche durante il cambio.
+            # La monotonia temporale vale nella stessa sessione.
+            if before == after and after % 2 == 0:
+                if previous_phase == after:
+                    assert elapsed >= previous, "Tempo di osservazione retrogrado"
+                previous, previous_phase = elapsed, after
+            else:
+                previous_phase = -1
+            count += 1
             stop.wait(0.02)
         return count
 
@@ -75,7 +86,9 @@ def run_case(n):
             readers = [pool.submit(reader) for _ in range(2)]
             try:
                 time.sleep(0.3)
+                phase += 1
                 ctl("max-set", str(min(n, 2)), root=True)
+                phase += 1
 
                 deadline = time.monotonic() + 12
                 for worker in workers:
@@ -87,12 +100,16 @@ def run_case(n):
 
             reads = sum(future.result() for future in readers)
 
-        text, f, counters, _ = snapshot(n)
+        text, f, counters, elapsed = snapshot(n)
         assert counters == (n, n, n, 0, 0, n), text
         assert int(f["System call del peak"]) == 35, text
         assert int(f["Effective UID del peak"]) == os.geteuid(), text
         assert f["Programma del peak"] == "syscall_hook_smoke", text
-        assert int(f["Peak delay"].split()[0]) >= 250_000_000, text
+        peak = int(f["Peak delay"].split()[0])
+        assert 0 <= peak <= round(elapsed * 1_000_000_000) + 2000, text
+        # Con otto worker e MAX=2 servono piu' rinnovi del budget.
+        if n == 8:
+            assert peak >= 1_500_000_000, text
         assert reads > 0, "Nessuno snapshot concorrente"
 
         print(text)

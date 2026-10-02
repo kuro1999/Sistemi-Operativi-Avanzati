@@ -19,6 +19,7 @@ struct st_statistics_state {
      * eventi appartenenti a una sessione precedente.
      */
     u64 generation;
+    u64 continuity_generation;
 
     bool session_active;
     bool session_closing;
@@ -161,10 +162,9 @@ static void st_statistics_account_blocked_time_locked(
  * Ogni generazione parte con current_blocked e peak_blocked
  * uguali a zero.
  *
- * I contesti appartenenti a una generazione precedente possono
- * essere ancora presenti sullo stack di waiter risvegliati da un
- * DISABLE. Tali contesti verranno riconosciuti tramite generation
- * e non modificheranno la nuova sessione.
+ * ENABLE e RESET esplicito aprono una nuova continuita'.
+ * Il reset dovuto a MAX_SET ripristina invece la continuita' precedente
+ * e il numero di waiter da trasferire nella nuova osservazione.
  *
  * Deve essere chiamata con st_statistics_lock acquisito.
  */
@@ -185,6 +185,7 @@ static void st_statistics_reset_session_locked(
 
     st_statistics.generation =
         next_generation;
+    st_statistics.continuity_generation = next_generation;
 
     st_statistics.session_active =
         session_active;
@@ -198,6 +199,31 @@ static void st_statistics_reset_session_locked(
     }
 }
 
+
+/*
+ * MAX_SET: nuova osservazione, continuita' dei waiter contabilizzati.
+ * Ordine dei lock: limiter -> statistiche; mai l'ordine inverso.
+ * Nessuna allocazione, attesa o modifica degli stack dei waiter.
+ */
+void st_statistics_max_changed(void)
+{
+    unsigned long flags;
+    u64 continuity;
+    u32 carried;
+
+    spin_lock_irqsave(&st_statistics_lock, flags);
+    if (st_statistics.session_active && !st_statistics.session_closing) {
+        carried = st_statistics.current_blocked;
+        continuity = st_statistics.continuity_generation;
+        st_statistics_reset_session_locked(ktime_get_ns(), true);
+        st_statistics.continuity_generation = continuity;
+        st_statistics.current_blocked = carried;
+        st_statistics.peak_blocked = carried;
+        st_statistics.relevant_invocations = carried;
+        st_statistics.blocked_invocations = carried;
+    }
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
+}
 
 void st_statistics_init(void)
 {
@@ -434,16 +460,12 @@ bool st_statistics_block_begin(
         goto out_unlock;
 
     /*
-     * Una syscall può entrare in THROTTLE soltanto nella stessa
-     * generazione nella quale era stata registrata come rilevante.
-     *
-     * Un RESET o un nuovo ENABLE intervenuto nel frattempo rende
-     * il token obsoleto e l'evento non viene attribuito alla nuova
-     * sessione.
+     * ENABLE e RESET esplicito invalidano i vecchi token.
+     * MAX_SET conserva invece la continuita' delle attese.
      */
     if (invocation_generation == 0U ||
-        invocation_generation !=
-            st_statistics.generation) {
+        invocation_generation < st_statistics.continuity_generation ||
+        invocation_generation > st_statistics.generation) {
         goto out_unlock;
     }
 
@@ -455,6 +477,12 @@ bool st_statistics_block_begin(
 
     st_statistics_account_blocked_time_locked(
         now_ns);
+
+    /* Rilevante prima di MAX_SET, contabilizzata come bloccata dopo. */
+    if (invocation_generation != st_statistics.generation)
+        st_statistics.relevant_invocations =
+            st_statistics_saturating_increment(
+                st_statistics.relevant_invocations);
 
     st_statistics.current_blocked++;
 
@@ -468,8 +496,7 @@ bool st_statistics_block_begin(
         st_statistics_saturating_increment(
             st_statistics.blocked_invocations);
 
-    context->generation =
-        invocation_generation;
+    context->generation = st_statistics.generation;
 
     /* Il delay parte dalla decisione; la contabilita usa now_ns. */
     context->start_ns = throttle_start_ns;
@@ -489,17 +516,9 @@ out_unlock:
 /*
  * Conclude un contesto precedentemente bloccato.
  *
- * Soltanto un contesto appartenente alla generazione corrente
- * può modificare current_blocked, i contatori di completamento
- * e il peak delay.
- *
- * Un contesto di una vecchia generazione viene semplicemente
- * disarmato. Questo caso può verificarsi quando:
- *
- *   vecchia sessione -> DISABLE -> nuova ENABLE
- *
- * prima che tutti i waiter risvegliati abbiano completato il
- * proprio percorso nel wrapper.
+ * I contesti trasferiti attraverso MAX_SET restano validi.
+ * ENABLE e RESET esplicito delimitano invece una nuova continuita':
+ * un contesto esterno a tale intervallo non modifica i contatori.
  */
 static void st_statistics_block_finish(
     struct st_statistics_block_context *context,
@@ -507,6 +526,7 @@ static void st_statistics_block_finish(
 {
     unsigned long flags;
     u64 delay_ns;
+    u64 delay_start_ns;
     u64 now_ns;
     bool same_generation;
     bool wake_drain = false;
@@ -524,17 +544,19 @@ static void st_statistics_block_finish(
 
     delay_ns = 0U;
 
-    if (now_ns >= context->start_ns)
-        delay_ns = now_ns - context->start_ns;
+    /* Un waiter trasferito misura solo il tratto della nuova sessione. */
+    delay_start_ns = max(context->start_ns, st_statistics.session_start_ns);
+    if (now_ns >= delay_start_ns)
+        delay_ns = now_ns - delay_start_ns;
 
     same_generation =
-        context->generation ==
-            st_statistics.generation;
+        context->generation >= st_statistics.continuity_generation &&
+        context->generation <= st_statistics.generation;
 
     /*
      * Il contesto non può modificare le statistiche quando:
      *
-     * - appartiene a una generazione precedente;
+     * - appartiene a una continuita' precedente;
      * - la propria sessione è già stata chiusa da DISABLE.
      *
      * Nel secondo caso la generazione può essere ancora uguale:

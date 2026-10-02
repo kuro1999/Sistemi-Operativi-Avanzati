@@ -190,8 +190,14 @@ struct st_max_config {
  *
  *   blocked_thread_time_ns / observation_ns
  *
- * peak_delay_ns misura il massimo intervallo trascorso tra il
- * primo THROTTLE e l'esecuzione effettiva della system call.
+ * Un cambio effettivo di MAX a monitor ON apre una nuova osservazione.
+ * I waiter presenti sono inclusi nei contatori relevant/blocked e nel
+ * picco iniziale. Il loro delay decorre dall'inizio della nuova sessione.
+ * MAX invariato non azzera; MAX_SET a monitor OFF conserva lo snapshot.
+ * Budget consumato e scadenza della finestra non vengono azzerati.
+ *
+ * peak_delay_ns misura il massimo ritardo prima dell'esecuzione della
+ * syscall, limitato alla sessione corrente per le attese trasferite.
  *
  * peak_valid indica se i campi peak_* contengono un campione
  * valido. session_active indica se la sessione è ancora aperta.
