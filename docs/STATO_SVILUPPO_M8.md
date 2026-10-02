@@ -1,3 +1,8 @@
+> **Documento storico di milestone.** Le descrizioni valgono per la fase
+> documentata e possono essere superate. Per il comportamento corrente
+> consultare [Comportamento e test](COMPORTAMENTO_E_TEST.md), aggiornato
+> al 2 ottobre 2026.
+
 # Syscall Throttle — Stato dello sviluppo
 
 **Versione aggiornata alla milestone M8.**
