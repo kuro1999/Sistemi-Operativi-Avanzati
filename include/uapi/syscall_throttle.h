@@ -234,6 +234,13 @@ struct st_statistics_snapshot {
  * Le ioctl ST_IOCTL_* riconosciute, dirette al nostro device, sono
  * escluse dal throttling. Controlli LSM e privilegi restano applicati.
  * L'eccezione non comprende apertura del device o avvio del controller.
+ *
+ * delete_module e' registrabile. Il wrapper mantiene un riferimento al
+ * monitor durante la chiamata: l'autorimozione ordinaria dal wrapper
+ * viene quindi rifiutata dal kernel. O_TRUNC viene rifiutato con EPERM
+ * nel percorso intercettato, anche per identita' non soggette al limite.
+ * Per rimuovere il monitor, usare DISABLE e poi rmmod; eventuali chiamate
+ * gia' entrate nel wrapper devono prima rilasciare i propri riferimenti.
  */
 
 /*

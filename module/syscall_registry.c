@@ -30,21 +30,6 @@ static bool st_syscall_number_is_valid(unsigned int number)
     return number < ST_SYSCALL_LIMIT;
 }
 
-/*
- * delete_module deve restare fuori dal meccanismo di redirect.
- *
- * La syscall viene eseguita da rmmod e conduce direttamente al
- * module_exit() del modulo. Se fosse deviata verso il wrapper,
- * st_syscall_hook_exit() attenderebbe anche la stessa invocazione
- * delete_module che potrà completarsi soltanto dopo il ritorno
- * del module_exit(), generando un'attesa circolare.
- */
-static bool st_syscall_number_is_supported(unsigned int number)
-{
-    return number !=
-        (unsigned int)__NR_delete_module;
-}
-
 void st_syscall_registry_init(void)
 {
     /*
@@ -75,9 +60,6 @@ int st_syscall_registry_add(unsigned int number)
 {
     if (!st_syscall_number_is_valid(number))
         return -EINVAL;
-
-    if (!st_syscall_number_is_supported(number))
-        return -EOPNOTSUPP;
 
     mutex_lock(&st_syscall_registry_lock);
 

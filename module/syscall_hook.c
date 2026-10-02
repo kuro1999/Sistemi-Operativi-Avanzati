@@ -7,6 +7,7 @@
 #include <linux/cred.h>
 #include <linux/errno.h>
 #include <linux/ftrace.h>
+#include <linux/fcntl.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/sched.h>
@@ -495,7 +496,7 @@ st_generic_syscall_wrapper(
  * - evita la ricorsione quando il wrapper richiama l'originale;
  * - esce immediatamente quando il monitor è disattivato;
  * - valida il percorso syscall nativo x86-64;
- * - scarta delete_module e le chiamate non registrate;
+ * - scarta le chiamate non registrate;
  * - trasporta l'indirizzo originale nel secondo argomento;
  * - devia l'instruction pointer verso il wrapper generico.
  */
@@ -601,20 +602,6 @@ static void notrace st_ftrace_callback(
         return;
 
     /*
-     * delete_module non può attraversare il wrapper:
-     *
-     * rmmod -> delete_module -> module_exit -> attesa active_calls
-     *
-     * Se active_calls includesse la stessa delete_module,
-     * module_exit attenderebbe un conteggio che può essere
-     * decrementato soltanto dopo il proprio ritorno.
-     */
-    if (unlikely(
-            syscall_nr ==
-                (unsigned int)__NR_delete_module))
-        return;
-
-    /*
      * Con una syscall non registrata non serve eseguire
      * classificazione, identity matching o rate limiting.
      */
@@ -710,6 +697,17 @@ static asmlinkage long notrace st_call_original_syscall(
 {
     struct st_nonreturning_call call;
     long result;
+
+    /*
+     * O_TRUNC richiede lo scaricamento forzato e potrebbe ignorare
+     * il riferimento a THIS_MODULE. Il controllo e' comune al
+     * percorso rilevante e a quello che non richiede throttling.
+     * Per le chiamate rilevanti avviene dopo l'ammissione.
+     */
+    if ((unsigned long)regs->orig_ax ==
+            (unsigned long)__NR_delete_module &&
+        ((unsigned int)regs->si & O_TRUNC))
+        return -EPERM;
 
     if (!target->nonreturning)
         return original_syscall(regs);
@@ -1103,6 +1101,7 @@ st_generic_syscall_wrapper(
     bool statistics_program_name_valid;
     bool first_throttle_seen;
     bool release_active_call;
+    bool module_pinned = false;
 
     long result;
     int identity_ret;
@@ -1143,6 +1142,19 @@ st_generic_syscall_wrapper(
 
         result = -ENOSYS;
         goto out;
+    }
+
+    /*
+     * Protegge ogni delete_module entrata nel wrapper, anche quando
+     * l'identita' non corrisponde alla policy. active_calls protegge
+     * gia' questo ingresso se un teardown concorrente e' iniziato.
+     */
+    if (syscall_nr == (unsigned int)__NR_delete_module) {
+        if (!try_module_get(THIS_MODULE)) {
+            result = -EBUSY;
+            goto out;
+        }
+        module_pinned = true;
     }
 
     original_syscall =
@@ -1310,6 +1322,10 @@ st_generic_syscall_wrapper(
 
 out:
     WARN_ON_ONCE(statistics_context.counted);
+
+    /* active_calls resta acquisito durante il rilascio del pin. */
+    if (module_pinned)
+        module_put(THIS_MODULE);
 
     if (release_active_call)
         st_hook_active_call_put();

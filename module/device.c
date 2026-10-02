@@ -967,8 +967,6 @@ static long st_device_ioctl_dispatch(struct file *file,
          * Il registro esegue:
          *
          * - la validazione architetturale number < NR_syscalls;
-         * - il rifiuto delle syscall non controllabili in
-         *   sicurezza, attualmente delete_module;
          * - la serializzazione degli aggiornamenti della bitmap.
          */
         ret = st_syscall_registry_add(request.number);
@@ -982,15 +980,6 @@ static long st_device_ioctl_dispatch(struct file *file,
         if (ret == -EEXIST) {
             pr_warn("syscall_throttle: system call %u "
                     "già registrata\n",
-                    request.number);
-            return ret;
-        }
-
-        if (ret == -EOPNOTSUPP) {
-            pr_warn("syscall_throttle: system call %u "
-                    "non supportata: delete_module deve restare "
-                    "fuori dal redirect Ftrace per consentire "
-                    "la rimozione sicura del modulo\n",
                     request.number);
             return ret;
         }
