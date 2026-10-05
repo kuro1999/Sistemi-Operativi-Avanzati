@@ -84,3 +84,63 @@ Prima della consegna restano:
    eccezione ioctl amministrative e restrizioni di delete_module.
 3. Consolidamento delle istruzioni riproducibili e preparazione della
    relazione e della dimostrazione.
+
+## Verifiche C aggiuntive
+
+Dopo la regressione sono state eseguite tre ulteriori prove in C,
+con sorgenti, binari e log conservati fuori dal repository.
+Non sono state necessarie modifiche al modulo.
+
+### Registri e permessi — PASS
+
+Verificati sui tre registri:
+
+- consultazione pubblica di liste vuote e popolate;
+- inserimento e rimozione da root;
+- rifiuto con EPERM dei sei comandi ADD/REMOVE da non-root;
+- duplicati, elementi assenti e capacità insufficiente;
+- richieste non valide e conservazione dei dati nei casi provati.
+
+Risultati locali:
+`/home/vboxuser/soa-test-results/registry-check-6cquBj`
+
+### Liste durante modifiche concorrenti — PASS
+
+Eseguite 1200 modifiche da un writer con tre lettori concorrenti.
+Ottenuti 3320 snapshot riusciti e 1186 risposte ENOSPC verificate,
+includendo i controlli preliminari.
+
+Verificati contenuti ammessi, assenza di duplicati, rispetto della
+capacità e mancata scrittura oltre gli elementi restituiti.
+Non si richiede che COUNT e LIST separati rappresentino lo stesso istante.
+
+Risultati locali:
+`/home/vboxuser/soa-test-results/registry-concurrent-yPAStb`
+
+### Identificazione dell'eseguibile — PASS
+
+- Basename lungo registrato: throttling applicato e identità corretta
+  nelle statistiche, anche con argv[0] e nome del thread differenti.
+- Basename non registrato: falsificare argv[0] e nome del thread
+  non causa una falsa selezione.
+- Basename diversi con prefisso condiviso: nessuna falsa corrispondenza.
+
+Il registro UID è rimasto vuoto durante la prova.
+Non sono stati verificati rinomina concorrente e script interpretati.
+
+Risultati locali:
+`/home/vboxuser/soa-test-results/identity-check-G1hbxW`
+
+### Stato conclusivo e consegna
+
+Le tre prove aggiuntive sono terminate con monitor OFF e registri vuoti.
+L'ultima prova ha lasciato MAX=0 e il modulo caricato.
+
+La sequenza comprende quindi 22 prove di regressione e tre prove C
+aggiuntive. Gli esiti valgono per i casi eseguiti e non dimostrano
+correttezza universale o portabilità verso altri kernel.
+
+Per la consegna è prevista una demo con controlli PASS/FAIL scritta in C.
+I test Python di sviluppo saranno archiviati fuori dal repository
+e rimossi dall'albero finale, aggiornando i riferimenti nella guida.
+La loro presenza nei commit storici non viene modificata.
