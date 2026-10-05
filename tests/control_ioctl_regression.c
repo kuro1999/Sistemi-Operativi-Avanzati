@@ -109,7 +109,20 @@ static void probe_blocked(int fd, unsigned long cmd)
     require(blocked, "ioctl estranea non osservata nel limiter");
     set_max(1);
     wait_ok(pid);
+    /* Verifica il waiter trasferito prima del successivo reset. */
+    command(ST_IOCTL_STATS_GET, &s);
+    require(s.relevant_invocations == 1 && s.blocked_invocations == 1 &&
+            s.completed_blocked_invocations == 1 &&
+            s.interrupted_blocked_invocations == 0 &&
+            s.current_blocked == 0,
+            "statistiche della singola ioctl dopo MAX=1");
     set_max(0);
+    command(ST_IOCTL_STATS_GET, &s);
+    require(s.relevant_invocations == 0 && s.blocked_invocations == 0 &&
+            s.completed_blocked_invocations == 0 &&
+            s.interrupted_blocked_invocations == 0 &&
+            s.current_blocked == 0,
+            "nuova sessione MAX=0 non vuota");
 }
 
 static void run_test(void)
@@ -183,12 +196,13 @@ static void run_test(void)
     message("PASS: comando sconosciuto sul monitor sottoposto al limite\n");
 
     command(ST_IOCTL_STATS_GET, &stats);
-    require(stats.relevant_invocations == 2 &&
-            stats.blocked_invocations == 2 &&
-            stats.completed_blocked_invocations == 2 &&
+    /* Ogni probe ha gia' verificato il completamento nella sua sessione. */
+    require(stats.relevant_invocations == 0 &&
+            stats.blocked_invocations == 0 &&
+            stats.completed_blocked_invocations == 0 &&
             stats.interrupted_blocked_invocations == 0 &&
             stats.current_blocked == 0,
-            "statistiche delle ioctl estranee");
+            "sessione finale MAX=0 non vuota");
 
     command(ST_IOCTL_DISABLE, NULL);
     command(ST_IOCTL_GET_STATUS, &status);
