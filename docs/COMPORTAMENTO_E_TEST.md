@@ -180,17 +180,42 @@ scaricamento, exit/exit_group e gestione protetta di delete_module.
 Questi esiti riguardano casi specifici. Non costituiscono una nuova esecuzione
 integrale della suite sull'ultimo commit né una verifica di ogni syscall.
 
+### Budget globale: test aggiornato e superato
+
+Il test `tests/global_budget_regression.py` prepara i worker prima di
+ENABLE e mantiene MAX=3 per tutta la prova. Non presume più che MAX_SET
+avvii una nuova finestra temporale.
+
+Esecuzione riportata dall'autore il 5 ottobre 2026, su kernel
+7.0.0-28-generic, con il test aggiornato sulla base del commit `ba2f67e`:
+
+- 16 worker: due nomi di programma, due EUID (0 e 1000), due syscall
+  (getpid e getppid), due processi per combinazione; registro UID vuoto.
+- Tre chiamate ammesse complessivamente e tredici waiter, con 20 snapshot
+  stabili fino a 0,522 secondi dal timestamp precedente a ENABLE.
+- Tutti i worker completati senza ulteriori cambi di MAX.
+- Statistiche finali: 16 invocazioni rilevanti, 13 bloccate,
+  13 attese completate, zero interruzioni e zero waiter residui.
+- Cleanup completato: monitor OFF, registri vuoti, MAX=0.
+
+Il risultato verifica la condivisione del budget nel caso provato.
+Il test controlla la prima parte della finestra e il completamento finale;
+non misura separatamente ogni finestra successiva. Un campionamento
+insufficiente entro il margine temporale produce un esito INCONCLUSIVO.
+
+La gestione di MAX resta distinta dalla sessione statistica: un cambio
+effettivo conserva consumo e scadenza della finestra, ma da ON apre una
+nuova osservazione, trasferendo i waiter e misurandone il ritardo dalla
+nuova sessione. Lo stesso MAX non rinnova né budget né statistiche.
+Da OFF, cambiare MAX conserva lo snapshot precedente.
+
 Prima della consegna:
 
-1. Aggiornare `global_budget_regression.py`: presume ancora che MAX_SET apra
-   una nuova finestra. Conservando la scadenza, il campionamento può attraversare
-   un rinnovo legittimo. Il PASS precedente non valida questa ipotesi temporale
-   sulla versione attuale.
-2. Verificare gli altri script storici e preparare una sequenza finale
+1. Verificare gli altri script storici e preparare una sequenza finale
    riproducibile, indicando commit e risultati.
-3. Esplicitare nella relazione finestre fisse, sessioni al cambio di MAX,
+2. Esplicitare nella relazione finestre fisse, sessioni al cambio di MAX,
    ritardi limitati alla sessione, eccezione ioctl e restrizioni di delete_module.
    Concordare eventuali interpretazioni della traccia.
-4. Consolidare il confronto requisito-per-requisito e i limiti di piattaforma:
+3. Consolidare il confronto requisito-per-requisito e i limiti di piattaforma:
    percorso nativo x86-64, header, Ftrace/Kprobes e configurazione kernel.
    Il numero di hook installati non dimostra il comportamento di ogni syscall.
