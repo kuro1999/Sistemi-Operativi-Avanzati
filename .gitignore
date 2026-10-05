@@ -38,3 +38,8 @@ compile_commands.json
 /tests/policy_transition_stress
 /tests/syscall_hook_smoke
 /tests/syscall_hook_signal
+
+# Generated Python caches and test executable
+__pycache__/
+*.py[cod]
+/tests/control_ioctl_regression
