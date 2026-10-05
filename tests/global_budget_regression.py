@@ -6,6 +6,7 @@ Controlla la prima parte della finestra e il completamento dei worker.
 import os
 import platform
 import pwd
+import select
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +35,9 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "39") == 0) nr = SYS_getpid;
     else if (strcmp(argv[1], "110") == 0) nr = SYS_getppid;
     else return 2;
+    char gate;
+    if (write(STDOUT_FILENO, "R", 1) != 1) return 4;
+    if (read(STDIN_FILENO, &gate, 1) != 1 || gate != 'G') return 5;
     return syscall(nr) > 0 ? 0 : 3;
 }
 """
@@ -49,8 +53,7 @@ def run(directory, uid, gid):
             ctl("syscall-add", str(number))
             registered.append(("syscall-remove", str(number)))
 
-        ctl("max-set", "0")
-        ctl("enable")
+        ctl("max-set", str(MAX))
 
         for name in NAMES:
             for euid, egid in ((0, 0), (uid, gid)):
@@ -59,74 +62,61 @@ def run(directory, uid, gid):
                         workers.append(subprocess.Popen(
                             [str(directory / name), str(number)],
                             user=euid, group=egid, extra_groups=[],
-                            stdout=subprocess.DEVNULL,
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL))
 
-        deadline = time.monotonic() + 8
-        while True:
-            report, _, counters, _ = snapshot(N)
-            if any(w.poll() is not None for w in workers):
-                raise RuntimeError(
-                    "Un worker e' terminato prima del rilascio")
-            if counters == (N, N, 0, 0, N, N):
-                break
-            if time.monotonic() > deadline:
-                raise RuntimeError(
-                    "Non osservati tutti i waiter:\n" + report)
-            time.sleep(0.02)
+        # Preparazione fuori dalla finestra: ogni worker attende il gate.
+        for worker in workers:
+            ready, _, _ = select.select([worker.stdout], [], [], 5)
+            if not ready or os.read(worker.stdout.fileno(), 1) != b"R":
+                raise RuntimeError("Worker non pronto al gate")
+        if any(worker.poll() is not None for worker in workers):
+            raise RuntimeError("Worker terminato prima di ENABLE")
+        print("16 worker pronti: 2 programmi x 2 EUID x 2 syscall x 2 processi",
+              flush=True)
 
-        print(
-            "16 waiter confermati: "
-            "2 programmi x 2 EUID x 2 syscall x 2 processi",
-            flush=True)
-
-        # MAX_SET apre una nuova finestra nel limiter attuale.
-        # t0 precede la ioctl: il margine temporale e' conservativo.
+        # ENABLE da OFF avvia la finestra. MAX resta 3 per tutta la prova.
+        # Il timestamp precedente alla ioctl rende il margine conservativo.
         t0 = time.monotonic()
-        ctl("max-set", str(MAX))
+        ctl("enable")
+        for worker in workers:
+            worker.stdin.write(b"G")
+            worker.stdin.flush()
+            worker.stdin.close()
 
-        samples, latest, observed_three = 0, 0.0, False
+        expected = (N, N - MAX, 0, 0, N - MAX, N - MAX)
+        samples, first, latest = 0, None, 0.0
         while True:
             report, _, counters, _ = snapshot(N)
+            codes = [worker.poll() for worker in workers]
             elapsed = time.monotonic() - t0
-
-            # Scartiamo campioni troppo vicini al rinnovo.
+            # Non attribuire alla prima finestra dati raccolti troppo tardi.
             if elapsed >= 0.70:
                 break
-
-            relevant, blocked, completed, interrupted, waiting, peak = counters
-
-            if (relevant, blocked, interrupted, peak) != (N, N, 0, N):
-                raise RuntimeError("Contatori inattesi:\n" + report)
-
-            if completed > MAX:
-                raise RuntimeError(
-                    "FAIL: superato il budget globale "
-                    "nella prima finestra:\n" + report)
-
-            if completed + waiting != N:
-                raise RuntimeError(
-                    "Contabilita' waiter incoerente:\n" + report)
-
-            observed_three |= (
-                completed == MAX and waiting == N - MAX)
-            samples += 1
-            latest = elapsed
-
-            if elapsed >= 0.50:
-                break
+            if any(code not in (None, 0) for code in codes):
+                raise RuntimeError("Worker terminato con errore")
+            finished = sum(code == 0 for code in codes)
+            if finished > MAX:
+                raise RuntimeError("FAIL: oltre 3 syscall completate prima "
+                                   "del rinnovo della finestra\n" + report)
+            if counters == expected and finished == MAX:
+                if first is None:
+                    first = elapsed
+                samples += 1
+                latest = elapsed
+                if latest >= 0.50 and latest - first >= 0.20 and samples >= 3:
+                    break
+            elif first is not None:
+                raise RuntimeError("FAIL: budget o waiter cambiati prima "
+                                   "del rinnovo\n" + report)
             time.sleep(0.02)
-
-        if samples < 3 or latest < 0.30 or not observed_three:
-            raise RuntimeError(
-                "INCONCLUSIVO: campionamento insufficiente nella "
-                "prima finestra; possibile ritardo della VM")
-
-        print(
-            f"PASS: prima parte della finestra, "
-            f"3 ammissioni e 13 waiter; "
-            f"{samples} snapshot, osservazione fino a {latest:.3f} s",
-            flush=True)
+        if (first is None or samples < 3 or latest < 0.50
+                or latest - first < 0.20):
+            raise RuntimeError("INCONCLUSIVO: osservazione insufficiente "
+                               "entro la prima finestra; ripetere il test")
+        print(f"PASS: 3 ammissioni globali e 13 waiter; {samples} snapshot "
+              f"stabili fino a {latest:.3f} s da prima di ENABLE", flush=True)
 
         deadline = time.monotonic() + 12
         for worker in workers:
@@ -137,7 +127,7 @@ def run(directory, uid, gid):
                     f"Worker terminato con codice {code}")
 
         report, _, counters, _ = snapshot(N)
-        if counters != (N, N, N, 0, 0, N):
+        if counters != (N, N - MAX, N - MAX, 0, 0, N - MAX):
             raise RuntimeError(
                 "Statistiche finali inattese:\n" + report)
 
