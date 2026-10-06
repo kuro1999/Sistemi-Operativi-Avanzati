@@ -1,3 +1,10 @@
+> Aggiornamento del 6 ottobre 2026: la race `relevant/reset`
+> elencata tra le limitazioni storiche è stata corretta mediante
+> protezione delle invocazioni ancora in fase di decisione.
+> Riproduzione, soluzione e verifiche sono descritte in
+> [VERIFICA_RACE_RELEVANT_RESET.md](VERIFICA_RACE_RELEVANT_RESET.md).
+> Le descrizioni precedenti della limitazione restano come storico.
+
 > **Documento storico di milestone.** Le descrizioni valgono per la fase
 > documentata e possono essere superate. Per il comportamento corrente
 > consultare [Comportamento e test](COMPORTAMENTO_E_TEST.md), aggiornato

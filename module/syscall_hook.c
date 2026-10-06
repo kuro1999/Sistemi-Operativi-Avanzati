@@ -1094,7 +1094,7 @@ st_generic_syscall_wrapper(
 
     u64 observed_generation;
     u64 throttle_start_ns = 0U;
-    u64 statistics_generation;
+    u64 statistics_generation = 0U;
     unsigned long raw_syscall_nr;
     unsigned int syscall_nr;
 
@@ -1234,6 +1234,7 @@ st_generic_syscall_wrapper(
                     &statistics_context);
             }
 
+            st_statistics_relevant_release(&statistics_generation);
             result = st_call_original_syscall(
                 target,
                 original_syscall,
@@ -1288,6 +1289,7 @@ st_generic_syscall_wrapper(
                     syscall_nr,
                     blocked_euid,
                     statistics_program_name);
+                st_statistics_relevant_release(&statistics_generation);
             }
 
             wait_ret =
@@ -1321,6 +1323,7 @@ st_generic_syscall_wrapper(
     }
 
 out:
+    st_statistics_relevant_release(&statistics_generation);
     WARN_ON_ONCE(statistics_context.counted);
 
     /* active_calls resta acquisito durante il rilascio del pin. */

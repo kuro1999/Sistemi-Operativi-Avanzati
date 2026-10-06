@@ -60,6 +60,8 @@ struct st_statistics_state {
  */
 static DEFINE_SPINLOCK(st_statistics_lock);
 static struct st_statistics_state st_statistics;
+/* Protetto da st_statistics_lock; non viene azzerato dai cambi sessione. */
+static u64 st_statistics_pending_invocations;
 static DECLARE_WAIT_QUEUE_HEAD(st_statistics_drain_queue);
 
 
@@ -353,7 +355,8 @@ int st_statistics_reset(void)
      * Cambiare sessione mentre questi contesti sono attivi
      * renderebbe ambiguo il reset esplicito.
      */
-    if (st_statistics.current_blocked != 0U ||
+    if (st_statistics_pending_invocations != 0U ||
+        st_statistics.current_blocked != 0U ||
         (st_statistics.session_active && st_statistics.session_closing)) {
         ret = -EBUSY;
         goto out_unlock;
@@ -409,6 +412,7 @@ u64 st_statistics_record_relevant_invocation(void)
             st_statistics_saturating_increment(
                 st_statistics.relevant_invocations);
 
+        st_statistics_pending_invocations++;
         generation =
             st_statistics.generation;
     }
@@ -420,6 +424,26 @@ u64 st_statistics_record_relevant_invocation(void)
     return generation;
 }
 
+
+/*
+ * Termina la fase relevant -> decisione. Il token appartiene al wrapper.
+ * Dopo block_begin il waiter e' gia' protetto da current_blocked;
+ * in caso di ammissione chiamare prima della syscall originale.
+ * Il contatore sopravvive a MAX_SET e alle transizioni OFF/ON.
+ */
+void st_statistics_relevant_release(u64 *generation)
+{
+    unsigned long flags;
+
+    if (generation == NULL || *generation == 0U)
+        return;
+
+    spin_lock_irqsave(&st_statistics_lock, flags);
+    if (!WARN_ON_ONCE(st_statistics_pending_invocations == 0U))
+        st_statistics_pending_invocations--;
+    *generation = 0U;
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
+}
 
 bool st_statistics_block_begin(
     struct st_statistics_block_context *context,
@@ -750,6 +774,7 @@ void st_statistics_exit(void)
         &st_statistics_lock,
         flags);
 
+    WARN_ON_ONCE(st_statistics_pending_invocations != 0U);
     WARN_ON_ONCE(
         st_statistics.current_blocked != 0U);
 

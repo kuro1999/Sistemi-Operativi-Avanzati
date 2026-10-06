@@ -345,6 +345,8 @@ struct st_statistics_snapshot {
  *
  * STATS_GET è pubblico e restituisce uno snapshot coerente.
  * STATS_RESET non trasferisce dati ed è riservato a root.
+ * Restituisce EBUSY anche durante la contabilizzazione di una decisione,
+ * oltre che in presenza di attese contabilizzate nel limiter.
  */
 #define ST_IOCTL_STATS_GET \
     _IOR(ST_IOCTL_MAGIC, 0x50, struct st_statistics_snapshot)

@@ -1317,7 +1317,7 @@ static long st_device_ioctl_dispatch(struct file *file,
 
         if (ret == -EBUSY) {
             pr_warn("syscall_throttle: STATS_RESET rifiutato: "
-                    "esistono thread bloccati\n");
+                    "invocazioni in decisione o thread bloccati\n");
         }
 
         return ret;
