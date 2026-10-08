@@ -1251,6 +1251,35 @@ out:
     return result;
 }
 
+/* Usata dal rollback dell'inizializzazione e dallo scaricamento. */
+static size_t st_hook_filters_remove(const char *phase)
+{
+    size_t index;
+    size_t removed = 0U;
+    int ret;
+
+    for (index = 0; index < st_hook_filter_count; index++) {
+        struct st_hook_filter *filter = &st_hook_filters[index];
+
+        if (!filter->installed)
+            continue;
+
+        ret = ftrace_set_filter_ip(&st_syscall_ftrace_ops,
+                                  filter->original_ip, 1, 0);
+        if (ret != 0) {
+            pr_err("syscall_throttle: %s filtro indice=%zu, "
+                   "indirizzo=%px fallito: errore=%d\n",
+                   phase, index, (void *)filter->original_ip, ret);
+        } else {
+            removed++;
+        }
+
+        filter->installed = false;
+    }
+
+    return removed;
+}
+
 int st_syscall_hook_init(void)
 {
     struct st_hook_filter *filter;
@@ -1258,7 +1287,6 @@ int st_syscall_hook_init(void)
     size_t syscall_nr;
     size_t explicit_count;
     size_t nonreturning_count;
-    int cleanup_ret;
     int ret;
 
     if (READ_ONCE(st_hook_installed))
@@ -1367,30 +1395,7 @@ int st_syscall_hook_init(void)
     return 0;
 
 fail_remove_filters:
-    for (filter_index = 0;
-         filter_index < st_hook_filter_count;
-         filter_index++) {
-        filter = &st_hook_filters[filter_index];
-
-        if (!filter->installed)
-            continue;
-
-        cleanup_ret = ftrace_set_filter_ip(
-            &st_syscall_ftrace_ops,
-            filter->original_ip,
-            1,
-            0);
-        if (cleanup_ret != 0) {
-            pr_err("syscall_throttle: rollback filtro "
-                   "indice=%zu, indirizzo=%px fallito: "
-                   "errore=%d\n",
-                   filter_index,
-                   (void *)filter->original_ip,
-                   cleanup_ret);
-        }
-
-        filter->installed = false;
-    }
+    st_hook_filters_remove("rollback");
 
 fail_tracepoint:
     st_nonreturning_tracepoint_exit();
@@ -1403,11 +1408,8 @@ fail_clear_state:
 
 void st_syscall_hook_exit(void)
 {
-    struct st_hook_filter *filter;
-    size_t filter_index;
     size_t removed_filter_count;
     int unregister_ret;
-    int filter_ret;
 
     if (!READ_ONCE(st_hook_installed))
         return;
@@ -1426,34 +1428,7 @@ void st_syscall_hook_exit(void)
                unregister_ret);
     }
 
-    removed_filter_count = 0U;
-
-    for (filter_index = 0;
-         filter_index < st_hook_filter_count;
-         filter_index++) {
-        filter = &st_hook_filters[filter_index];
-
-        if (!filter->installed)
-            continue;
-
-        filter_ret = ftrace_set_filter_ip(
-            &st_syscall_ftrace_ops,
-            filter->original_ip,
-            1,
-            0);
-        if (filter_ret != 0) {
-            pr_err("syscall_throttle: rimozione filtro "
-                   "indice=%zu, indirizzo=%px fallita: "
-                   "errore=%d\n",
-                   filter_index,
-                   (void *)filter->original_ip,
-                   filter_ret);
-        } else {
-            removed_filter_count++;
-        }
-
-        filter->installed = false;
-    }
+    removed_filter_count = st_hook_filters_remove("rimozione");
 
     /*
      * Il tracepoint sched_process_exit deve rimanere attivo
