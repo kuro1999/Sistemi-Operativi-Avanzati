@@ -999,7 +999,7 @@ static int execute_statistics_reset(int fd)
         } else if (errno == EBUSY) {
             fprintf(stderr,
                     "Reset statistiche non eseguibile: "
-                    "esistono thread attualmente bloccati.\n");
+                    "contabilizzazione o attese in corso, oppure sessione in chiusura.\n");
         } else {
             fprintf(stderr,
                     "ioctl ST_IOCTL_STATS_RESET fallita: %s\n",
@@ -1068,10 +1068,7 @@ static int execute_syscall_update(int fd, __u32 number, int add)
                     number, add ? "già" : "non");
         else if (add && errno == EOPNOTSUPP)
             fprintf(stderr,
-                    "System call %u non supportata: "
-                    "delete_module non può essere sottoposta "
-                    "a throttling perché è necessaria alla "
-                    "rimozione sicura del modulo.\n", number);
+                    "System call %u non supportata dal driver.\n", number);
         else if (errno == EINVAL)
             fprintf(stderr, "Numero di system call non valido per l'ABI x86-64 corrente: %u.\n",
                     number);
