@@ -64,7 +64,6 @@ static struct st_statistics_state st_statistics;
 static u64 st_statistics_pending_invocations;
 static DECLARE_WAIT_QUEUE_HEAD(st_statistics_drain_queue);
 
-
 static u64 st_statistics_saturating_add(
     u64 left,
     u64 right)
@@ -76,7 +75,6 @@ static u64 st_statistics_saturating_add(
 
     return result;
 }
-
 
 static u64 st_statistics_saturating_multiply(
     u64 value,
@@ -94,7 +92,6 @@ static u64 st_statistics_saturating_multiply(
     return result;
 }
 
-
 static u64 st_statistics_saturating_increment(
     u64 value)
 {
@@ -103,7 +100,6 @@ static u64 st_statistics_saturating_increment(
 
     return value + 1U;
 }
-
 
 /*
  * Produce una nuova generazione diversa da zero.
@@ -121,7 +117,6 @@ static u64 st_statistics_next_generation(
 
     return generation;
 }
-
 
 /*
  * Deve essere chiamata con st_statistics_lock acquisito.
@@ -157,7 +152,6 @@ static void st_statistics_account_blocked_time_locked(
     st_statistics.last_blocked_change_ns = now_ns;
 }
 
-
 /*
  * Apre o azzera una sessione statistica.
  *
@@ -180,27 +174,19 @@ static void st_statistics_reset_session_locked(
         st_statistics_next_generation(
             st_statistics.generation);
 
-    memset(
-        &st_statistics,
-        0,
-        sizeof(st_statistics));
+    memset(&st_statistics, 0, sizeof(st_statistics));
 
-    st_statistics.generation =
-        next_generation;
+    st_statistics.generation = next_generation;
     st_statistics.continuity_generation = next_generation;
 
-    st_statistics.session_active =
-        session_active;
+    st_statistics.session_active = session_active;
 
     if (session_active) {
-        st_statistics.session_start_ns =
-            now_ns;
+        st_statistics.session_start_ns = now_ns;
 
-        st_statistics.last_blocked_change_ns =
-            now_ns;
+        st_statistics.last_blocked_change_ns = now_ns;
     }
 }
-
 
 /*
  * MAX_SET: nuova osservazione, continuita' dei waiter contabilizzati.
@@ -231,22 +217,14 @@ void st_statistics_init(void)
 {
     unsigned long flags;
 
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
+    spin_lock_irqsave(&st_statistics_lock, flags);
 
-    memset(
-        &st_statistics,
-        0,
-        sizeof(st_statistics));
+    memset(&st_statistics, 0, sizeof(st_statistics));
 
-    spin_unlock_irqrestore(
-        &st_statistics_lock,
-        flags);
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 
     pr_info("syscall_throttle: statistiche inizializzate\n");
 }
-
 
 void st_statistics_session_start(void)
 {
@@ -254,9 +232,7 @@ void st_statistics_session_start(void)
     u64 generation;
     u64 now_ns;
 
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
+    spin_lock_irqsave(&st_statistics_lock, flags);
 
     now_ns = ktime_get_ns();
 
@@ -264,18 +240,14 @@ void st_statistics_session_start(void)
         now_ns,
         true);
 
-    generation =
-        st_statistics.generation;
+    generation = st_statistics.generation;
 
-    spin_unlock_irqrestore(
-        &st_statistics_lock,
-        flags);
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 
     pr_info("syscall_throttle: sessione statistiche "
             "avviata: generazione=%llu\n",
             (unsigned long long)generation);
 }
-
 
 /* Lettura protetta della condizione della wait queue. */
 static bool st_statistics_waiters_drained(void)
@@ -329,7 +301,6 @@ void st_statistics_session_stop(void)
                 (unsigned long long)generation);
 }
 
-
 int st_statistics_reset(void)
 {
     unsigned long flags;
@@ -342,9 +313,7 @@ int st_statistics_reset(void)
     session_active = false;
     ret = 0;
 
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
+    spin_lock_irqsave(&st_statistics_lock, flags);
 
     now_ns = ktime_get_ns();
 
@@ -362,20 +331,16 @@ int st_statistics_reset(void)
         goto out_unlock;
     }
 
-    session_active =
-        st_statistics.session_active;
+    session_active = st_statistics.session_active;
 
     st_statistics_reset_session_locked(
         now_ns,
         session_active);
 
-    generation =
-        st_statistics.generation;
+    generation = st_statistics.generation;
 
 out_unlock:
-    spin_unlock_irqrestore(
-        &st_statistics_lock,
-        flags);
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 
     if (ret == 0) {
         pr_info("syscall_throttle: statistiche azzerate: "
@@ -387,7 +352,6 @@ out_unlock:
     return ret;
 }
 
-
 u64 st_statistics_record_relevant_invocation(void)
 {
     unsigned long flags;
@@ -395,9 +359,7 @@ u64 st_statistics_record_relevant_invocation(void)
 
     generation = 0U;
 
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
+    spin_lock_irqsave(&st_statistics_lock, flags);
 
     if (st_statistics.session_active && !st_statistics.session_closing) {
         /*
@@ -413,17 +375,13 @@ u64 st_statistics_record_relevant_invocation(void)
                 st_statistics.relevant_invocations);
 
         st_statistics_pending_invocations++;
-        generation =
-            st_statistics.generation;
+        generation = st_statistics.generation;
     }
 
-    spin_unlock_irqrestore(
-        &st_statistics_lock,
-        flags);
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 
     return generation;
 }
-
 
 /*
  * Termina la fase relevant -> decisione. Il token appartiene al wrapper.
@@ -474,9 +432,7 @@ bool st_statistics_block_begin(
 
     counted = false;
 
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
+    spin_lock_irqsave(&st_statistics_lock, flags);
 
     now_ns = ktime_get_ns();
 
@@ -499,8 +455,7 @@ bool st_statistics_block_begin(
         goto out_unlock;
     }
 
-    st_statistics_account_blocked_time_locked(
-        now_ns);
+    st_statistics_account_blocked_time_locked(now_ns);
 
     /* Rilevante prima di MAX_SET, contabilizzata come bloccata dopo. */
     if (invocation_generation != st_statistics.generation)
@@ -512,8 +467,7 @@ bool st_statistics_block_begin(
 
     if (st_statistics.current_blocked >
         st_statistics.peak_blocked) {
-        st_statistics.peak_blocked =
-            st_statistics.current_blocked;
+        st_statistics.peak_blocked = st_statistics.current_blocked;
     }
 
     st_statistics.blocked_invocations =
@@ -529,13 +483,10 @@ bool st_statistics_block_begin(
     counted = true;
 
 out_unlock:
-    spin_unlock_irqrestore(
-        &st_statistics_lock,
-        flags);
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 
     return counted;
 }
-
 
 /*
  * Conclude un contesto precedentemente bloccato.
@@ -560,9 +511,7 @@ static void st_statistics_block_finish(
         return;
     }
 
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
+    spin_lock_irqsave(&st_statistics_lock, flags);
 
     now_ns = ktime_get_ns();
 
@@ -591,8 +540,7 @@ static void st_statistics_block_finish(
         goto out_unlock;
     }
 
-    st_statistics_account_blocked_time_locked(
-        now_ns);
+    st_statistics_account_blocked_time_locked(now_ns);
 
     if (WARN_ON_ONCE(
             st_statistics.current_blocked == 0U)) {
@@ -627,11 +575,9 @@ static void st_statistics_block_finish(
         st_statistics.peak_valid = true;
         st_statistics.peak_delay_ns = delay_ns;
 
-        st_statistics.peak_syscall_nr =
-            context->syscall_nr;
+        st_statistics.peak_syscall_nr = context->syscall_nr;
 
-        st_statistics.peak_euid =
-            context->effective_uid;
+        st_statistics.peak_euid = context->effective_uid;
 
         strscpy(
             st_statistics.peak_program,
@@ -640,9 +586,7 @@ static void st_statistics_block_finish(
     }
 
 out_unlock:
-    spin_unlock_irqrestore(
-        &st_statistics_lock,
-        flags);
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 
     /*
      * Anche un contesto appartenente a una vecchia generazione
@@ -653,24 +597,17 @@ out_unlock:
         wake_up_all(&st_statistics_drain_queue);
 }
 
-
 void st_statistics_block_complete(
     struct st_statistics_block_context *context)
 {
-    st_statistics_block_finish(
-        context,
-        false);
+    st_statistics_block_finish(context, false);
 }
-
 
 void st_statistics_block_interrupted(
     struct st_statistics_block_context *context)
 {
-    st_statistics_block_finish(
-        context,
-        true);
+    st_statistics_block_finish(context, true);
 }
-
 
 void st_statistics_get_snapshot(
     struct st_statistics_snapshot *snapshot)
@@ -684,22 +621,15 @@ void st_statistics_get_snapshot(
 
     memset(snapshot, 0, sizeof(*snapshot));
 
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
+    spin_lock_irqsave(&st_statistics_lock, flags);
 
     now_ns = ktime_get_ns();
 
     if (st_statistics.session_active) {
-        st_statistics_account_blocked_time_locked(
-            now_ns);
-    }
-
-    if (st_statistics.session_active) {
+        st_statistics_account_blocked_time_locked(now_ns);
         observation_end_ns = now_ns;
     } else {
-        observation_end_ns =
-            st_statistics.session_stop_ns;
+        observation_end_ns = st_statistics.session_stop_ns;
     }
 
     if (st_statistics.session_start_ns != 0U &&
@@ -710,35 +640,25 @@ void st_statistics_get_snapshot(
             st_statistics.session_start_ns;
     }
 
-    snapshot->blocked_thread_time_ns =
-        st_statistics.blocked_thread_time_ns;
+    snapshot->blocked_thread_time_ns = st_statistics.blocked_thread_time_ns;
 
-    snapshot->relevant_invocations =
-        st_statistics.relevant_invocations;
+    snapshot->relevant_invocations = st_statistics.relevant_invocations;
 
-    snapshot->blocked_invocations =
-        st_statistics.blocked_invocations;
+    snapshot->blocked_invocations = st_statistics.blocked_invocations;
 
-    snapshot->completed_blocked_invocations =
-        st_statistics.completed_blocked_invocations;
+    snapshot->completed_blocked_invocations = st_statistics.completed_blocked_invocations;
 
-    snapshot->interrupted_blocked_invocations =
-        st_statistics.interrupted_blocked_invocations;
+    snapshot->interrupted_blocked_invocations = st_statistics.interrupted_blocked_invocations;
 
-    snapshot->total_delay_ns =
-        st_statistics.total_delay_ns;
+    snapshot->total_delay_ns = st_statistics.total_delay_ns;
 
-    snapshot->peak_delay_ns =
-        st_statistics.peak_delay_ns;
+    snapshot->peak_delay_ns = st_statistics.peak_delay_ns;
 
-    snapshot->current_blocked =
-        st_statistics.current_blocked;
+    snapshot->current_blocked = st_statistics.current_blocked;
 
-    snapshot->peak_blocked =
-        st_statistics.peak_blocked;
+    snapshot->peak_blocked = st_statistics.peak_blocked;
 
-    snapshot->peak_syscall_nr =
-        st_statistics.peak_syscall_nr;
+    snapshot->peak_syscall_nr = st_statistics.peak_syscall_nr;
 
     snapshot->peak_valid =
         st_statistics.peak_valid ? 1U : 0U;
@@ -758,11 +678,8 @@ void st_statistics_get_snapshot(
             sizeof(snapshot->peak_program));
     }
 
-    spin_unlock_irqrestore(
-        &st_statistics_lock,
-        flags);
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 }
-
 
 void st_statistics_exit(void)
 {
@@ -770,22 +687,15 @@ void st_statistics_exit(void)
 
     st_statistics_session_stop();
 
-    spin_lock_irqsave(
-        &st_statistics_lock,
-        flags);
+    spin_lock_irqsave(&st_statistics_lock, flags);
 
     WARN_ON_ONCE(st_statistics_pending_invocations != 0U);
     WARN_ON_ONCE(
         st_statistics.current_blocked != 0U);
 
-    memset(
-        &st_statistics,
-        0,
-        sizeof(st_statistics));
+    memset(&st_statistics, 0, sizeof(st_statistics));
 
-    spin_unlock_irqrestore(
-        &st_statistics_lock,
-        flags);
+    spin_unlock_irqrestore(&st_statistics_lock, flags);
 
     pr_info("syscall_throttle: statistiche rilasciate\n");
 }
