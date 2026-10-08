@@ -18,7 +18,6 @@ st_monitor_fast_path_enabled(void){
     return static_branch_unlikely(&st_monitor_enabled_key);
 }
 
-void st_monitor_state_init(void);
 void st_monitor_state_exit(void);
 
 void st_monitor_enable(void);

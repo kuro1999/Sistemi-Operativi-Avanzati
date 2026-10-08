@@ -21,7 +21,6 @@ static int __init syscall_throttle_init(void)
     * le strutture dati già pronte all'uso.
     */
 
-    st_monitor_state_init();
     st_uid_registry_init();
     st_program_registry_init();
     st_syscall_registry_init();

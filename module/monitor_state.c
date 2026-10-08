@@ -15,16 +15,6 @@
  */
 DEFINE_STATIC_KEY_FALSE(st_monitor_enabled_key);
 
-void st_monitor_state_init(void)
-{
-    /*
-     * DEFINE_STATIC_KEY_FALSE inizializza già la key come falsa.
-     * Non è necessario eseguire un aggiornamento del codice
-     * durante il caricamento del modulo.
-     */
-    pr_info("syscall_throttle: monitor inizializzato come disattivato\n");
-}
-
 void st_monitor_state_exit(void)
 {
     /*

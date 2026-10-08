@@ -7,7 +7,6 @@
 
 #include <syscall_throttle.h>
 
-#include "program_identity.h"
 #include "program_registry.h"
 
 struct st_program_entry {
@@ -175,7 +174,6 @@ bool st_program_registry_contains(const char *name)
     return found;
 }
 
-
 int st_program_registry_snapshot(struct st_program_name *programs,
                                  __u32 capacity,
                                  __u32 *count)
@@ -230,22 +228,6 @@ int st_program_registry_snapshot(struct st_program_name *programs,
 
     up_read(&st_program_registry_lock);
     return 0;
-}
-
-
-bool st_program_registry_contains_current(void)
-{
-    char name[ST_PROGRAM_NAME_CAPACITY];
-
-    /*
-     * Un task privo di eseguibile user-space, oppure un errore
-     * nell'identificazione, non corrisponde ad alcun programma
-     * registrato.
-     */
-    if (st_program_get_current_name(name, sizeof(name)) != 0)
-        return false;
-
-    return st_program_registry_contains(name);
 }
 
 unsigned int st_program_registry_count(void)
