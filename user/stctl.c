@@ -157,73 +157,39 @@ static int execute_disable(int fd)
     return 0;
 }
 
-static int execute_uid_add(int fd, __u32 uid)
+static int execute_uid_update(int fd, __u32 uid, int add)
 {
-    struct st_uid_request request = {
-        .uid = uid,
-        .reserved = 0U,
-    };
+    struct st_uid_request request = {.uid = uid, .reserved = 0U};
+    unsigned long command = add ? ST_IOCTL_UID_ADD : ST_IOCTL_UID_REMOVE;
 
-    if (ioctl(fd, ST_IOCTL_UID_ADD, &request) == -1) {
-        if (errno == EEXIST) {
-            fprintf(stderr,
-                    "UID %u già registrato.\n",
-                    (unsigned int)uid);
-        } else if (errno == EPERM) {
-            fprintf(stderr,
-                    "Registrazione UID non consentita: "
-                    "sono richiesti privilegi root.\n");
-        } else if (errno == EINVAL) {
-            fprintf(stderr,
-                    "UID %u non valido.\n",
-                    (unsigned int)uid);
-        } else {
-            fprintf(stderr,
-                    "ioctl ST_IOCTL_UID_ADD fallita: %s\n",
-                    strerror(errno));
-        }
-
+    if (ioctl(fd, command, &request) == -1) {
+        if (errno == (add ? EEXIST : ENOENT))
+            fprintf(stderr, "UID %u %s registrato.\n",
+                    (unsigned int)uid, add ? "già" : "non");
+        else if (errno == EPERM)
+            fprintf(stderr, "%s UID non consentita: sono richiesti privilegi root.\n",
+                    add ? "Registrazione" : "Rimozione");
+        else if (errno == EINVAL)
+            fprintf(stderr, "UID %u non valido.\n", (unsigned int)uid);
+        else
+            fprintf(stderr, "ioctl ST_IOCTL_UID_%s fallita: %s\n",
+                    add ? "ADD" : "REMOVE", strerror(errno));
         return 1;
     }
 
-    printf("UID %u registrato.\n", (unsigned int)uid);
+    printf("UID %u %s.\n", (unsigned int)uid, add ? "registrato" : "rimosso");
     return 0;
 }
 
+static int execute_uid_add(int fd, __u32 uid)
+{
+    return execute_uid_update(fd, uid, 1);
+}
 
 static int execute_uid_remove(int fd, __u32 uid)
 {
-    struct st_uid_request request = {
-        .uid = uid,
-        .reserved = 0U,
-    };
-
-    if (ioctl(fd, ST_IOCTL_UID_REMOVE, &request) == -1) {
-        if (errno == ENOENT) {
-            fprintf(stderr,
-                    "UID %u non registrato.\n",
-                    (unsigned int)uid);
-        } else if (errno == EPERM) {
-            fprintf(stderr,
-                    "Rimozione UID non consentita: "
-                    "sono richiesti privilegi root.\n");
-        } else if (errno == EINVAL) {
-            fprintf(stderr,
-                    "UID %u non valido.\n",
-                    (unsigned int)uid);
-        } else {
-            fprintf(stderr,
-                    "ioctl ST_IOCTL_UID_REMOVE fallita: %s\n",
-                    strerror(errno));
-        }
-
-        return 1;
-    }
-
-    printf("UID %u rimosso.\n", (unsigned int)uid);
-    return 0;
+    return execute_uid_update(fd, uid, 0);
 }
-
 
 static int execute_uid_count(int fd)
 {
@@ -385,75 +351,41 @@ static int validate_program_name(const char *name)
     return 0;
 }
 
-static int execute_program_add(int fd, const char *name)
+static int execute_program_update(int fd, const char *name, int add)
 {
     struct st_program_request request = {0};
+    unsigned long command = add ? ST_IOCTL_PROGRAM_ADD : ST_IOCTL_PROGRAM_REMOVE;
 
-    /*
-     * validate_program_name() garantisce che il nome e il
-     * terminatore NUL entrino nell'array della richiesta.
-     */
+    /* Il chiamante ha gia validato basename e lunghezza. */
     memcpy(request.name, name, strlen(name) + 1U);
-
-    if (ioctl(fd, ST_IOCTL_PROGRAM_ADD, &request) == -1) {
-        if (errno == EEXIST) {
-            fprintf(stderr,
-                    "Programma '%s' già registrato.\n",
-                    name);
-        } else if (errno == EPERM) {
-            fprintf(stderr,
-                    "Registrazione programma non consentita: "
-                    "sono richiesti privilegi root.\n");
-        } else if (errno == EINVAL) {
-            fprintf(stderr,
-                    "Nome programma non valido: %s\n",
-                    name);
-        } else {
-            fprintf(stderr,
-                    "ioctl ST_IOCTL_PROGRAM_ADD fallita: %s\n",
-                    strerror(errno));
-        }
-
+    if (ioctl(fd, command, &request) == -1) {
+        if (errno == (add ? EEXIST : ENOENT))
+            fprintf(stderr, "Programma '%s' %s registrato.\n",
+                    name, add ? "già" : "non");
+        else if (errno == EPERM)
+            fprintf(stderr, "%s programma non consentita: sono richiesti privilegi root.\n",
+                    add ? "Registrazione" : "Rimozione");
+        else if (errno == EINVAL)
+            fprintf(stderr, "Nome programma non valido: %s\n", name);
+        else
+            fprintf(stderr, "ioctl ST_IOCTL_PROGRAM_%s fallita: %s\n",
+                    add ? "ADD" : "REMOVE", strerror(errno));
         return 1;
     }
 
-    printf("Programma '%s' registrato.\n", name);
+    printf("Programma '%s' %s.\n", name, add ? "registrato" : "rimosso");
     return 0;
 }
 
+static int execute_program_add(int fd, const char *name)
+{
+    return execute_program_update(fd, name, 1);
+}
 
 static int execute_program_remove(int fd, const char *name)
 {
-    struct st_program_request request = {0};
-
-    memcpy(request.name, name, strlen(name) + 1U);
-
-    if (ioctl(fd, ST_IOCTL_PROGRAM_REMOVE, &request) == -1) {
-        if (errno == ENOENT) {
-            fprintf(stderr,
-                    "Programma '%s' non registrato.\n",
-                    name);
-        } else if (errno == EPERM) {
-            fprintf(stderr,
-                    "Rimozione programma non consentita: "
-                    "sono richiesti privilegi root.\n");
-        } else if (errno == EINVAL) {
-            fprintf(stderr,
-                    "Nome programma non valido: %s\n",
-                    name);
-        } else {
-            fprintf(stderr,
-                    "ioctl ST_IOCTL_PROGRAM_REMOVE fallita: %s\n",
-                    strerror(errno));
-        }
-
-        return 1;
-    }
-
-    printf("Programma '%s' rimosso.\n", name);
-    return 0;
+    return execute_program_update(fd, name, 0);
 }
-
 
 static int execute_program_count(int fd)
 {
@@ -1122,111 +1054,48 @@ static int execute_simple_command(int fd, const char *name)
     return command != NULL ? command->execute(fd) : 1;
 }
 
-static int execute_syscall_add(int fd, __u32 number)
+static int execute_syscall_update(int fd, __u32 number, int add)
 {
-    struct st_syscall_request request = {
-        .number = number,
-        .reserved = 0U,
-    };
+    struct st_syscall_request request = {.number = number, .reserved = 0U};
+    unsigned long command = add ? ST_IOCTL_SYSCALL_ADD : ST_IOCTL_SYSCALL_REMOVE;
 
-    if (ioctl(fd, ST_IOCTL_SYSCALL_ADD, &request) == -1) {
-        switch (errno) {
-        case EPERM:
-            fprintf(stderr,
-                    "Registrazione system call non consentita: "
-                    "sono richiesti privilegi root.\n");
-            break;
-
-        case EEXIST:
-            fprintf(stderr,
-                    "System call %u già registrata.\n",
-                    number);
-            break;
-
-        case EOPNOTSUPP:
+    if (ioctl(fd, command, &request) == -1) {
+        if (errno == EPERM)
+            fprintf(stderr, "%s system call non consentita: sono richiesti privilegi root.\n",
+                    add ? "Registrazione" : "Rimozione");
+        else if (errno == (add ? EEXIST : ENOENT))
+            fprintf(stderr, "System call %u %s registrata.\n",
+                    number, add ? "già" : "non");
+        else if (add && errno == EOPNOTSUPP)
             fprintf(stderr,
                     "System call %u non supportata: "
                     "delete_module non può essere sottoposta "
                     "a throttling perché è necessaria alla "
-                    "rimozione sicura del modulo.\n",
+                    "rimozione sicura del modulo.\n", number);
+        else if (errno == EINVAL)
+            fprintf(stderr, "Numero di system call non valido per l'ABI x86-64 corrente: %u.\n",
                     number);
-            break;
-
-        case EINVAL:
-            fprintf(stderr,
-                    "Numero di system call non valido per "
-                    "l'ABI x86-64 corrente: %u.\n",
-                    number);
-            break;
-
-        case EFAULT:
-            fprintf(stderr,
-                    "Richiesta SYSCALL_ADD non accessibile "
-                    "dal kernel.\n");
-            break;
-
-        default:
-            fprintf(stderr,
-                    "ioctl ST_IOCTL_SYSCALL_ADD fallita: %s\n",
-                    strerror(errno));
-            break;
-        }
-
+        else if (errno == EFAULT)
+            fprintf(stderr, "Richiesta SYSCALL_%s non accessibile dal kernel.\n",
+                    add ? "ADD" : "REMOVE");
+        else
+            fprintf(stderr, "ioctl ST_IOCTL_SYSCALL_%s fallita: %s\n",
+                    add ? "ADD" : "REMOVE", strerror(errno));
         return 1;
     }
 
-    printf("System call %u registrata.\n", number);
-
+    printf("System call %u %s.\n", number, add ? "registrata" : "rimossa");
     return 0;
+}
+
+static int execute_syscall_add(int fd, __u32 number)
+{
+    return execute_syscall_update(fd, number, 1);
 }
 
 static int execute_syscall_remove(int fd, __u32 number)
 {
-    struct st_syscall_request request = {
-        .number = number,
-        .reserved = 0U,
-    };
-
-    if (ioctl(fd, ST_IOCTL_SYSCALL_REMOVE, &request) == -1) {
-        switch (errno) {
-        case EPERM:
-            fprintf(stderr,
-                    "Rimozione system call non consentita: "
-                    "sono richiesti privilegi root.\n");
-            break;
-
-        case ENOENT:
-            fprintf(stderr,
-                    "System call %u non registrata.\n",
-                    number);
-            break;
-
-        case EINVAL:
-            fprintf(stderr,
-                    "Numero di system call non valido per "
-                    "l'ABI x86-64 corrente: %u.\n",
-                    number);
-            break;
-
-        case EFAULT:
-            fprintf(stderr,
-                    "Richiesta SYSCALL_REMOVE non accessibile "
-                    "dal kernel.\n");
-            break;
-
-        default:
-            fprintf(stderr,
-                    "ioctl ST_IOCTL_SYSCALL_REMOVE fallita: %s\n",
-                    strerror(errno));
-            break;
-        }
-
-        return 1;
-    }
-
-    printf("System call %u rimossa.\n", number);
-
-    return 0;
+    return execute_syscall_update(fd, number, 0);
 }
 
 int main(int argc, char *argv[])
