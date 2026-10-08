@@ -184,7 +184,6 @@ static int st_hook_targets_prepare(void)
     return 0;
 }
 
-
 /*
  * Risolve un singolo simbolo kernel tramite una Kprobe
  * temporanea.
@@ -406,7 +405,6 @@ static void st_hook_runtime_clear(void)
 static atomic_t st_hook_active_calls = ATOMIC_INIT(0);
 static DECLARE_WAIT_QUEUE_HEAD(st_hook_active_wait_queue);
 
-
 /*
  * Per exit ed exit_group la funzione originale non restituisce
  * il controllo al wrapper.
@@ -446,38 +444,6 @@ static void notrace st_nonreturning_call_track(
 
 static bool notrace st_nonreturning_call_cancel(
     struct st_nonreturning_call *call);
-
-/*
- * Contatori diagnostici della prima integrazione con i registry.
- *
- * Non vengono esposti nello UAPI e non fanno parte delle
- * statistiche finali richieste dal progetto. Servono a verificare
- * che il wrapper classifichi correttamente le chiamate.
- */
-static atomic64_t st_hook_total_calls = ATOMIC64_INIT(0);
-static atomic64_t st_hook_monitor_disabled_calls =
-    ATOMIC64_INIT(0);
-static atomic64_t st_hook_unregistered_syscall_calls =
-    ATOMIC64_INIT(0);
-static atomic64_t st_hook_unmatched_identity_calls =
-    ATOMIC64_INIT(0);
-static atomic64_t st_hook_relevant_calls = ATOMIC64_INIT(0);
-
-static atomic64_t st_hook_rate_bypass_calls =
-    ATOMIC64_INIT(0);
-static atomic64_t st_hook_rate_allow_calls =
-    ATOMIC64_INIT(0);
-static atomic64_t st_hook_rate_throttle_calls =
-    ATOMIC64_INIT(0);
-static atomic64_t st_hook_rate_shutdown_calls =
-    ATOMIC64_INIT(0);
-
-/*
- * Chiamate terminate prima della system call originale perché
- * l'attesa è stata interrotta da un segnale.
- */
-static atomic64_t st_hook_wait_interrupted_calls =
-    ATOMIC64_INIT(0);
 
 static bool st_hook_accepting_calls;
 static bool st_hook_installed;
@@ -608,7 +574,6 @@ static void notrace st_ftrace_callback(
     if (!st_syscall_registry_contains(syscall_nr))
         return;
 
-
     /*
      * Ricaviamo l'inizio canonico della funzione intercettata.
      * Il valore ip ricevuto dal callback può rappresentare il
@@ -646,8 +611,6 @@ static struct ftrace_ops st_syscall_ftrace_ops = {
              FTRACE_OPS_FL_IPMODIFY,
 };
 
-
-
 /*
  * Verifica la corrispondenza completa:
  *
@@ -680,8 +643,6 @@ st_hook_target_find(
 
     return target;
 }
-
-
 
 /*
  * Invoca il vero wrapper x86-64.
@@ -768,13 +729,10 @@ static bool st_syscall_is_relevant(
     }
 
     if (!st_monitor_fast_path_enabled()) {
-        atomic64_inc(&st_hook_monitor_disabled_calls);
         return false;
     }
 
     if (!st_syscall_registry_contains(syscall_nr)) {
-        atomic64_inc(
-            &st_hook_unregistered_syscall_calls);
         return false;
     }
 
@@ -784,13 +742,11 @@ static bool st_syscall_is_relevant(
      * chiamata subirà effettivamente un THROTTLE.
      */
     if (st_uid_registry_contains(current_euid())) {
-        atomic64_inc(&st_hook_relevant_calls);
         return true;
     }
 
     if (program_name == NULL ||
         program_name_capacity == 0U) {
-        atomic64_inc(&st_hook_unmatched_identity_calls);
         return false;
     }
 
@@ -809,16 +765,13 @@ static bool st_syscall_is_relevant(
         if (program_name_valid != NULL)
             *program_name_valid = true;
 
-        atomic64_inc(&st_hook_relevant_calls);
         return true;
     }
 
-    atomic64_inc(&st_hook_unmatched_identity_calls);
     return false;
 }
 
-
-/* Rivalutazione senza modificare i contatori diagnostici. */
+/* Rivaluta la policy dopo le modifiche ai registri e i risvegli. */
 static bool st_syscall_policy_still_matches(unsigned int syscall_nr)
 {
     char name[ST_PROGRAM_NAME_CAPACITY];
@@ -833,37 +786,6 @@ static bool st_syscall_policy_still_matches(unsigned int syscall_nr)
 }
 
 /*
- * Registra ogni decisione presa dal rate limiter.
- *
- * THROTTLE conta gli ingressi nell'attesa, non gli esiti finali
- * delle chiamate. Uno stesso thread può quindi incrementarlo più
- * volte prima di ottenere ALLOW.
- */
-static void st_record_rate_limiter_decision(
-    enum st_rate_limiter_decision decision)
-{
-    switch (decision) {
-    case ST_RATE_LIMITER_RETRY:
-        break;
-    case ST_RATE_LIMITER_BYPASS:
-        atomic64_inc(&st_hook_rate_bypass_calls);
-        break;
-
-    case ST_RATE_LIMITER_ALLOW:
-        atomic64_inc(&st_hook_rate_allow_calls);
-        break;
-
-    case ST_RATE_LIMITER_THROTTLE:
-        atomic64_inc(&st_hook_rate_throttle_calls);
-        break;
-
-    case ST_RATE_LIMITER_SHUTDOWN:
-        atomic64_inc(&st_hook_rate_shutdown_calls);
-        break;
-    }
-}
-
-/*
  * Rilascia una reference acquisita dal callback Ftrace.
  *
  * Deve essere chiamata su ogni percorso di uscita dal wrapper,
@@ -874,7 +796,6 @@ static void notrace st_hook_active_call_put(void)
     if (atomic_dec_and_test(&st_hook_active_calls))
         wake_up_all(&st_hook_active_wait_queue);
 }
-
 
 /*
  * Inserisce un record sullo stack del wrapper nella lista dei
@@ -1160,8 +1081,6 @@ st_generic_syscall_wrapper(
     original_syscall =
         (st_x64_syscall_t)original_ip;
 
-    atomic64_inc(&st_hook_total_calls);
-
     /*
      * Process context: prima di policy, budget e statistiche.
      * L'helper esegue la richiesta sul file verificato, senza
@@ -1212,8 +1131,6 @@ st_generic_syscall_wrapper(
                 &observed_generation,
                 first_throttle_seen ? NULL : &throttle_start_ns);
         }
-
-        st_record_rate_limiter_decision(decision);
 
         switch (decision) {
         case ST_RATE_LIMITER_RETRY:
@@ -1297,8 +1214,6 @@ st_generic_syscall_wrapper(
                     observed_generation);
 
             if (wait_ret != 0) {
-                atomic64_inc(
-                    &st_hook_wait_interrupted_calls);
 
                 /*
                  * La syscall originale non verrà eseguita.
@@ -1336,7 +1251,6 @@ out:
     return result;
 }
 
-
 int st_syscall_hook_init(void)
 {
     struct st_hook_filter *filter;
@@ -1355,18 +1269,6 @@ int st_syscall_hook_init(void)
         return -EBUSY;
 
     atomic_set(&st_hook_active_calls, 0);
-
-    atomic64_set(&st_hook_total_calls, 0);
-    atomic64_set(&st_hook_monitor_disabled_calls, 0);
-    atomic64_set(&st_hook_unregistered_syscall_calls, 0);
-    atomic64_set(&st_hook_unmatched_identity_calls, 0);
-    atomic64_set(&st_hook_relevant_calls, 0);
-
-    atomic64_set(&st_hook_rate_bypass_calls, 0);
-    atomic64_set(&st_hook_rate_allow_calls, 0);
-    atomic64_set(&st_hook_rate_throttle_calls, 0);
-    atomic64_set(&st_hook_rate_shutdown_calls, 0);
-    atomic64_set(&st_hook_wait_interrupted_calls, 0);
 
     atomic64_set(&st_nonreturning_started, 0);
     atomic64_set(&st_nonreturning_completed, 0);
@@ -1499,8 +1401,6 @@ fail_clear_state:
     return ret;
 }
 
-
-
 void st_syscall_hook_exit(void)
 {
     struct st_hook_filter *filter;
@@ -1567,34 +1467,6 @@ void st_syscall_hook_exit(void)
 
     WARN_ON(!list_empty(
         &st_nonreturning_calls));
-
-    pr_info("syscall_throttle: diagnostica hook x86-64: "
-            "totali=%lld, monitor_spento=%lld, "
-            "syscall_non_registrata=%lld, "
-            "identita_non_corrispondente=%lld, "
-            "rilevanti=%lld, limiter_bypass=%lld, "
-            "limiter_allow=%lld, limiter_throttle=%lld, "
-            "limiter_shutdown=%lld, wait_interrotte=%lld\n",
-            (long long)atomic64_read(
-                &st_hook_total_calls),
-            (long long)atomic64_read(
-                &st_hook_monitor_disabled_calls),
-            (long long)atomic64_read(
-                &st_hook_unregistered_syscall_calls),
-            (long long)atomic64_read(
-                &st_hook_unmatched_identity_calls),
-            (long long)atomic64_read(
-                &st_hook_relevant_calls),
-            (long long)atomic64_read(
-                &st_hook_rate_bypass_calls),
-            (long long)atomic64_read(
-                &st_hook_rate_allow_calls),
-            (long long)atomic64_read(
-                &st_hook_rate_throttle_calls),
-            (long long)atomic64_read(
-                &st_hook_rate_shutdown_calls),
-            (long long)atomic64_read(
-                &st_hook_wait_interrupted_calls));
 
     pr_info("syscall_throttle: diagnostica nonreturning: "
             "avviate=%lld, completate=%lld, "

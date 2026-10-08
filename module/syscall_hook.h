@@ -2,20 +2,17 @@
 #define ST_SYSCALL_HOOK_H
 
 /*
- * Installa il componente di intercettazione Ftrace.
- *
- * L'implementazione corrente intercetta __x64_sys_nanosleep,
- * verifica la rilevanza della chiamata e applica il rate limiter
- * prima dell'esecuzione della system call originale.
+ * Installa gli hook Ftrace per le syscall native x86-64.
+ * Le chiamate registrate vengono deviate al wrapper quando il
+ * monitor e attivo; il wrapper applica policy e rate limiter.
  */
 int st_syscall_hook_init(void);
 
 /*
- * Impedisce nuove deviazioni, rimuove l'hook e attende la
- * terminazione di tutti i wrapper già attivi.
+ * Impedisce nuove deviazioni, rimuove gli hook e attende i wrapper
+ * attivi. Il tracepoint di exit/exit_group resta fino al loro termine.
  *
- * Il rate limiter deve essere arrestato prima di questa funzione,
- * così eventuali wrapper bloccati possono essere risvegliati.
+ * Arrestare prima il rate limiter per risvegliare i waiter.
  */
 void st_syscall_hook_exit(void);
 
