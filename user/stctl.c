@@ -11,49 +11,19 @@
 
 static void print_usage(const char *program_name)
 {
-    fprintf(stderr,
-            "Uso:\n"
-            "  %s ping\n"
-            "  %s status\n"
-            "  %s enable\n"
-            "  %s disable\n"
-            "  %s uid-add <UID>\n"
-            "  %s uid-remove <UID>\n"
-            "  %s uid-count\n"
-            "  %s uid-list\n"
-            "  %s program-add <nome>\n"
-            "  %s program-remove <nome>\n"
-            "  %s program-count\n"
-            "  %s program-list\n"
-            "  %s syscall-add <numero>\n"
-            "  %s syscall-remove <numero>\n"
-            "  %s syscall-count\n"
-            "  %s syscall-list\n"
-            "  %s max-set <valore>\n"
-            "  %s max-get\n"
-            "  %s stats\n"
-            "  %s stats-reset\n",
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name,
-            program_name);
+    static const char *const syntax[] = {
+        "ping", "status", "enable", "disable",
+        "uid-add <UID>", "uid-remove <UID>", "uid-count", "uid-list",
+        "program-add <nome>", "program-remove <nome>", "program-count", "program-list",
+        "syscall-add <numero>", "syscall-remove <numero>", "syscall-count", "syscall-list",
+        "max-set <valore>", "max-get", "stats", "stats-reset",
+    };
+
+    fprintf(stderr, "Uso:\n");
+    for (size_t i = 0; i < sizeof(syntax) / sizeof(syntax[0]); i++)
+        fprintf(stderr, "  %s %s\n", program_name, syntax[i]);
 }
+
 
 /* Solo cifre decimali; il limite dipende dal tipo richiesto. */
 static int parse_decimal(const char *text, uint64_t limit, uint64_t *out)
@@ -77,7 +47,7 @@ static int parse_decimal(const char *text, uint64_t limit, uint64_t *out)
     return 0;
 }
 
-static int parse_uid(const char *text, __u32 *out)
+static int parse_u32(const char *text, __u32 *out)
 {
     uint64_t value;
 
@@ -88,15 +58,7 @@ static int parse_uid(const char *text, __u32 *out)
     return 0;
 }
 
-static int parse_syscall_number(const char *text, __u32 *out)
-{
-    return parse_uid(text, out);
-}
 
-static int parse_max_invocations(const char *text, uint64_t *out)
-{
-    return parse_decimal(text, UINT64_MAX, out);
-}
 
 static int execute_ping(int fd)
 {
@@ -181,15 +143,7 @@ static int execute_uid_update(int fd, __u32 uid, int add)
     return 0;
 }
 
-static int execute_uid_add(int fd, __u32 uid)
-{
-    return execute_uid_update(fd, uid, 1);
-}
 
-static int execute_uid_remove(int fd, __u32 uid)
-{
-    return execute_uid_update(fd, uid, 0);
-}
 
 static int execute_uid_count(int fd)
 {
@@ -377,15 +331,7 @@ static int execute_program_update(int fd, const char *name, int add)
     return 0;
 }
 
-static int execute_program_add(int fd, const char *name)
-{
-    return execute_program_update(fd, name, 1);
-}
 
-static int execute_program_remove(int fd, const char *name)
-{
-    return execute_program_update(fd, name, 0);
-}
 
 static int execute_program_count(int fd)
 {
@@ -1043,16 +989,7 @@ static const struct simple_command *find_simple_command(const char *name)
     return NULL;
 }
 
-static int is_simple_command(const char *name)
-{
-    return find_simple_command(name) != NULL;
-}
 
-static int execute_simple_command(int fd, const char *name)
-{
-    const struct simple_command *command = find_simple_command(name);
-    return command != NULL ? command->execute(fd) : 1;
-}
 
 static int execute_syscall_update(int fd, __u32 number, int add)
 {
@@ -1085,132 +1022,124 @@ static int execute_syscall_update(int fd, __u32 number, int add)
     return 0;
 }
 
-static int execute_syscall_add(int fd, __u32 number)
-{
-    return execute_syscall_update(fd, number, 1);
-}
 
-static int execute_syscall_remove(int fd, __u32 number)
-{
-    return execute_syscall_update(fd, number, 0);
-}
+
+enum operation {
+    OP_SIMPLE,
+    OP_UID_ADD, OP_UID_REMOVE,
+    OP_PROGRAM_ADD, OP_PROGRAM_REMOVE,
+    OP_SYSCALL_ADD, OP_SYSCALL_REMOVE,
+    OP_MAX_SET
+};
+
+static const struct {
+    const char *name;
+    enum operation operation;
+} argument_commands[] = {
+    {"uid-add", OP_UID_ADD},
+    {"uid-remove", OP_UID_REMOVE},
+    {"program-add", OP_PROGRAM_ADD},
+    {"program-remove", OP_PROGRAM_REMOVE},
+    {"syscall-add", OP_SYSCALL_ADD},
+    {"syscall-remove", OP_SYSCALL_REMOVE},
+    {"max-set", OP_MAX_SET},
+};
 
 int main(int argc, char *argv[])
 {
-    __u32 uid = 0U;
-    __u32 syscall_number = 0U;
+    const struct simple_command *simple = NULL;
+    enum operation operation = OP_SIMPLE;
+    __u32 number = 0U;
     uint64_t max_invocations = 0U;
-    const char *program_name = NULL;
-    int uid_operation = 0;
-    int program_operation = 0;
-    int syscall_operation = 0;
-    int max_operation = 0;
-    int fd;
-    int result;
+    const char *invalid = NULL;
+    int fd, result;
 
-    if (argc == 2 && is_simple_command(argv[1])) {
-        /*
-         * I comandi semplici non richiedono ulteriori
-         * operazioni di parsing.
-         */
-    } else if (argc == 3 &&
-               (strcmp(argv[1], "uid-add") == 0 ||
-                strcmp(argv[1], "uid-remove") == 0)) {
-        if (parse_uid(argv[2], &uid) != 0) {
-            fprintf(stderr,
-                    "UID non valido: %s\n",
-                    argv[2]);
+    if (argc == 2) {
+        simple = find_simple_command(argv[1]);
+        if (simple == NULL)
+            goto usage;
+    } else if (argc == 3) {
+        size_t i;
+        for (i = 0; i < sizeof(argument_commands) / sizeof(argument_commands[0]); i++) {
+            if (strcmp(argv[1], argument_commands[i].name) == 0) {
+                operation = argument_commands[i].operation;
+                break;
+            }
+        }
+        if (operation == OP_SIMPLE)
+            goto usage;
+
+        switch (operation) {
+        case OP_UID_ADD:
+        case OP_UID_REMOVE:
+            if (parse_u32(argv[2], &number) != 0)
+                invalid = "UID non valido";
+            break;
+        case OP_SYSCALL_ADD:
+        case OP_SYSCALL_REMOVE:
+            if (parse_u32(argv[2], &number) != 0)
+                invalid = "Numero di system call non valido";
+            break;
+        case OP_PROGRAM_ADD:
+        case OP_PROGRAM_REMOVE:
+            if (validate_program_name(argv[2]) != 0)
+                invalid = "Nome programma non valido";
+            break;
+        case OP_MAX_SET:
+            if (parse_decimal(argv[2], UINT64_MAX, &max_invocations) != 0)
+                invalid = "Valore MAX non valido";
+            break;
+        case OP_SIMPLE:
+            goto usage;
+        }
+        if (invalid != NULL) {
+            fprintf(stderr, "%s: %s\n", invalid, argv[2]);
             return 1;
         }
-
-        if (strcmp(argv[1], "uid-add") == 0)
-            uid_operation = 1;
-        else
-            uid_operation = 2;
-
-    } else if (argc == 3 &&
-               (strcmp(argv[1], "program-add") == 0 ||
-                strcmp(argv[1], "program-remove") == 0)) {
-        if (validate_program_name(argv[2]) != 0) {
-            fprintf(stderr,
-                    "Nome programma non valido: %s\n",
-                    argv[2]);
-            return 1;
-        }
-
-        program_name = argv[2];
-
-        if (strcmp(argv[1], "program-add") == 0)
-            program_operation = 1;
-        else
-            program_operation = 2;
-
-    } else if (argc == 3 &&
-               (strcmp(argv[1], "syscall-add") == 0 ||
-                strcmp(argv[1], "syscall-remove") == 0)) {
-        if (parse_syscall_number(argv[2],
-                                 &syscall_number) != 0) {
-            fprintf(stderr,
-                    "Numero di system call non valido: %s\n",
-                    argv[2]);
-            return 1;
-        }
-
-        if (strcmp(argv[1], "syscall-add") == 0)
-            syscall_operation = 1;
-        else
-            syscall_operation = 2;
-
-    } else if (argc == 3 &&
-               strcmp(argv[1], "max-set") == 0) {
-        if (parse_max_invocations(argv[2],
-                                  &max_invocations) != 0) {
-            fprintf(stderr,
-                    "Valore MAX non valido: %s\n",
-                    argv[2]);
-            return 1;
-        }
-
-        max_operation = 1;
-
     } else {
-        print_usage(argv[0]);
-        return 1;
+        goto usage;
     }
 
+    /* Apriamo il device solo dopo aver validato tutti gli argomenti. */
     fd = open(ST_DEVICE_PATH, O_RDWR);
     if (fd == -1) {
-        fprintf(stderr,
-                "Impossibile aprire %s: %s\n",
-                ST_DEVICE_PATH,
-                strerror(errno));
+        fprintf(stderr, "Impossibile aprire %s: %s\n",
+                ST_DEVICE_PATH, strerror(errno));
         return 1;
     }
 
-    if (uid_operation == 1)
-        result = execute_uid_add(fd, uid);
-    else if (uid_operation == 2)
-        result = execute_uid_remove(fd, uid);
-    else if (program_operation == 1)
-        result = execute_program_add(fd, program_name);
-    else if (program_operation == 2)
-        result = execute_program_remove(fd, program_name);
-    else if (syscall_operation == 1)
-        result = execute_syscall_add(fd, syscall_number);
-    else if (syscall_operation == 2)
-        result = execute_syscall_remove(fd, syscall_number);
-    else if (max_operation == 1)
+    switch (operation) {
+    case OP_UID_ADD:
+    case OP_UID_REMOVE:
+        result = execute_uid_update(fd, number, operation == OP_UID_ADD);
+        break;
+    case OP_PROGRAM_ADD:
+    case OP_PROGRAM_REMOVE:
+        result = execute_program_update(fd, argv[2], operation == OP_PROGRAM_ADD);
+        break;
+    case OP_SYSCALL_ADD:
+    case OP_SYSCALL_REMOVE:
+        result = execute_syscall_update(fd, number, operation == OP_SYSCALL_ADD);
+        break;
+    case OP_MAX_SET:
         result = execute_max_set(fd, max_invocations);
-    else
-        result = execute_simple_command(fd, argv[1]);
+        break;
+    case OP_SIMPLE:
+        result = simple->execute(fd);
+        break;
+    default:
+        result = 1;
+        break;
+    }
 
     if (close(fd) == -1) {
-        fprintf(stderr,
-                "Chiusura di %s fallita: %s\n",
-                ST_DEVICE_PATH,
-                strerror(errno));
+        fprintf(stderr, "Chiusura di %s fallita: %s\n",
+                ST_DEVICE_PATH, strerror(errno));
         return 1;
     }
-
     return result;
+
+usage:
+    print_usage(argv[0]);
+    return 1;
 }
