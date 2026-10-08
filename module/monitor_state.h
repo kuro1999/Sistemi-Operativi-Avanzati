@@ -13,17 +13,9 @@
  */
 DECLARE_STATIC_KEY_FALSE(st_monitor_enabled_key);
 
-/*
- * Helper destinato ai percorsi eseguiti per ogni system call.
- *
- * Essendo sempre inline, il jump-label site viene inserito
- * direttamente nel callback Ftrace o nel wrapper.
- */
 static __always_inline bool
-st_monitor_fast_path_enabled(void)
-{
-    return static_branch_unlikely(
-        &st_monitor_enabled_key);
+st_monitor_fast_path_enabled(void){
+    return static_branch_unlikely(&st_monitor_enabled_key);
 }
 
 void st_monitor_state_init(void);

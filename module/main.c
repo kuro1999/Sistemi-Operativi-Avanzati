@@ -15,6 +15,12 @@ static int __init syscall_throttle_init(void)
 {
     int ret;
 
+    /*
+    * Inizializziamo tutti i sottosistemi prima di installare
+    * l'hook, affinché i wrapper delle syscall trovino
+    * le strutture dati già pronte all'uso.
+    */
+
     st_monitor_state_init();
     st_uid_registry_init();
     st_program_registry_init();
@@ -22,11 +28,6 @@ static int __init syscall_throttle_init(void)
     st_rate_limiter_init();
     st_statistics_init();
 
-    /*
-     * L'hook viene installato soltanto dopo che registry e
-     * rate limiter sono stati inizializzati e prima di rendere
-     * disponibile il device di controllo allo user-space.
-     */
     ret = st_syscall_hook_init();
     if (ret != 0)
         goto fail_syscall_hook;

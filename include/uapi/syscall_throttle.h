@@ -4,50 +4,34 @@
 #include <linux/ioctl.h>
 #include <linux/types.h>
 
-/*
- * Nome e percorso del character device.
- */
 #define ST_DEVICE_NAME "syscall_throttle"
 #define ST_DEVICE_PATH "/dev/" ST_DEVICE_NAME
 
-/*
- * Lunghezza massima del basename di un eseguibile
- *
- * ST_PROGRAM_NAME_MAX non comprende il terminatore
- */
 #define ST_PROGRAM_NAME_MAX 255U
 #define ST_PROGRAM_NAME_CAPACITY (ST_PROGRAM_NAME_MAX + 1U)
 
-/*
- * Identificatore dei comandi ioctl appartenenti al driver
- */
+ // Identificatore dei comandi ioctl appartenenti al driver
+
 #define ST_IOCTL_MAGIC 'S'
 
 /*
- * Stato del monitor restituito allo user-space
- *
- * Non usiamo bool nell'UAPI: __u32 ha una dimensione fissa e rende
- * l'interfaccia binaria più prevedibile
+ * I campi reserved sono riservati a estensioni future dell'UAPI.
+ * Devono essere inizializzati a zero dallo user-space.
+ * Il kernel li restituisce a zero nelle strutture di output.
  */
+
+ // Stato del monitor restituito allo user-space
+
 struct st_monitor_status {
     __u32 enabled;
     __u32 reserved;
 };
 
-/*
- * Richiesta relativa a un UID
- *
- * uid contiene il valore numerico dell'UID nello user-space
- * reserved deve essere impostato a zero
- */
 struct st_uid_request {
     __u32 uid;
     __u32 reserved;
 };
 
-/*
- * Numero di UID attualmente presenti nel registro
- */
 struct st_uid_count {
     __u32 count;
     __u32 reserved;
@@ -61,8 +45,6 @@ struct st_uid_count {
  * capacity indica quanti elementi può contenere l'array.
  *
  * count viene scritto dal kernel con il numero di UID registrati.
- *
- * reserved deve essere inizializzato a zero.
  */
 struct st_uid_list_request {
     __aligned_u64 uids_ptr;
@@ -74,29 +56,19 @@ struct st_uid_list_request {
 /*
  * Richiesta relativa al nome di un programma.
  *
- * name contiene esclusivamente il basename dell'eseguibile,
- * terminato da NUL e senza caratteri '/'.
- *
- * reserved deve essere inizializzato a zero.
+ * name contiene esclusivamente il basename dell'eseguibile
  */
+/* Basename terminato da NUL, senza caratteri slash. */
 struct st_program_request {
     char name[ST_PROGRAM_NAME_CAPACITY];
     __u32 reserved[2];
 };
 
-/*
- * Numero di programmi attualmente presenti nel registro.
- *
- * reserved viene inizializzato a zero dal kernel.
- */
 struct st_program_count {
     __u32 count;
     __u32 reserved;
 };
 
-/*
- * Singolo elemento restituito da PROGRAM_LIST.
- */
 struct st_program_name {
     char name[ST_PROGRAM_NAME_CAPACITY];
 };
@@ -106,8 +78,7 @@ struct st_program_name {
  *
  * programs_ptr indica un array user-space di struct st_program_name.
  * capacity è il numero di elementi disponibili nell'array.
- * count viene aggiornato con il numero di programmi richiesti
- * oppure effettivamente restituiti.
+ * count viene aggiornato con il numero di programmi richiesti oppure effettivamente restituiti.
  */
 struct st_program_list_request {
     __aligned_u64 programs_ptr;
@@ -120,22 +91,15 @@ struct st_program_list_request {
  * Richiesta relativa a un numero di system call x86-64.
  *
  * number contiene il numero della system call.
- * reserved deve essere inizializzato a zero.
- *
- * Il kernel verifica che number appartenga al dominio della
- * ABI x86-64 nativa supportata dal kernel corrente.
  */
 struct st_syscall_request {
     __u32 number;
     __u32 reserved;
 };
 
-/*
- * Risposta contenente il numero di system call attualmente
- * presenti nel registro.
- *
- * reserved viene restituito sempre a zero.
- */
+
+ // Risposta contenente il numero di system call attualmente presenti nel registro.
+
 struct st_syscall_count {
     __u32 count;
     __u32 reserved;
@@ -152,8 +116,6 @@ struct st_syscall_count {
  *
  * count viene aggiornato dal kernel con il numero di elementi
  * necessari oppure effettivamente restituiti.
- *
- * reserved deve essere inizializzato a zero.
  */
 struct st_syscall_list_request {
     __aligned_u64 numbers_ptr;
@@ -167,8 +129,6 @@ struct st_syscall_list_request {
  *
  * max_invocations indica il numero massimo di system call
  * rilevanti ammesse durante una finestra di un secondo.
- *
- * I campi reserved devono essere impostati a zero.
  */
 struct st_max_config {
     __aligned_u64 max_invocations;
@@ -201,8 +161,6 @@ struct st_max_config {
  *
  * peak_valid indica se i campi peak_* contengono un campione
  * valido. session_active indica se la sessione è ancora aperta.
- *
- * Tutti i campi reserved devono essere zero.
  */
 struct st_statistics_snapshot {
     __aligned_u64 observation_ns;
@@ -231,20 +189,14 @@ struct st_statistics_snapshot {
 };
 
 /*
- * Le ioctl ST_IOCTL_* riconosciute, dirette al nostro device, sono
- * escluse dal throttling. Controlli LSM e privilegi restano applicati.
- * L'eccezione non comprende apertura del device o avvio del controller.
- *
- * delete_module e' registrabile. Il wrapper mantiene un riferimento al
- * monitor durante la chiamata: l'autorimozione ordinaria dal wrapper
- * viene quindi rifiutata dal kernel. O_TRUNC viene rifiutato con EPERM
- * nel percorso intercettato, anche per identita' non soggette al limite.
- * Per rimuovere il monitor, usare DISABLE e poi rmmod; eventuali chiamate
- * gia' entrate nel wrapper devono prima rilasciare i propri riferimenti.
+ * Le ioctl di controllo del device sono escluse dal throttling,
+ * ma restano soggette ai controlli LSM e ai privilegi del driver.
  */
 
-/*
- * Comando minimale usato per verificare la comunicazione con il driver.
+
+ // Comando minimale usato per verificare la comunicazione con il driver.
+/* Il bypass vale solo per comandi ST_IOCTL_* riconosciuti sul device.
+ * Non comprende apertura del device o avvio del controller.
  */
 #define ST_IOCTL_PING \
     _IO(ST_IOCTL_MAGIC, 0x00)
@@ -260,48 +212,31 @@ struct st_statistics_snapshot {
 #define ST_IOCTL_DISABLE \
     _IO(ST_IOCTL_MAGIC, 0x02)
 
-/*
- * Lettura dello stato corrente.
- *
- * _IOR indica un trasferimento dal kernel verso lo user-space.
- */
+
+ // Lettura dello stato corrente.
 #define ST_IOCTL_GET_STATUS \
     _IOR(ST_IOCTL_MAGIC, 0x03, struct st_monitor_status)
 
-/*
- * Gestione del registro UID.
- *
- * _IOW indica che la struttura viene trasferita dallo user-space
- * verso il kernel.
- */
+
+ // Gestione del registro UID.
 #define ST_IOCTL_UID_ADD \
     _IOW(ST_IOCTL_MAGIC, 0x10, struct st_uid_request)
 
 #define ST_IOCTL_UID_REMOVE \
     _IOW(ST_IOCTL_MAGIC, 0x11, struct st_uid_request)
 
-/*
- * Restituisce il numero di UID registrati.
- *
- * La struttura viene trasferita dal kernel verso lo user-space.
- */
+
+ // Restituisce il numero di UID registrati.
 #define ST_IOCTL_UID_GET_COUNT \
     _IOR(ST_IOCTL_MAGIC, 0x12, struct st_uid_count)
 
-/*
- * Restituisce l'elenco degli UID registrati.
- *
- * _IOWR indica che la struttura viene trasferita in entrambe
- * le direzioni tra user-space e kernel.
- */
+
+ // Restituisce l'elenco degli UID registrati.
 #define ST_IOCTL_UID_LIST \
     _IOWR(ST_IOCTL_MAGIC, 0x13, struct st_uid_list_request)
 
-/*
- * Gestione del registro dei nomi degli eseguibili.
- *
- * La struttura viene trasferita dallo user-space verso il kernel.
- */
+
+ // Gestione del registro dei nomi degli eseguibili.
 #define ST_IOCTL_PROGRAM_ADD \
     _IOW(ST_IOCTL_MAGIC, 0x20, struct st_program_request)
 
@@ -319,6 +254,11 @@ struct st_statistics_snapshot {
  *
  * Le richieste vengono trasferite dallo user-space al kernel.
  */
+/* delete_module e registrabile: il wrapper mantiene un riferimento al
+ * monitor e ne impedisce l autorimozione ordinaria. O_TRUNC viene
+ * rifiutato con EPERM nel percorso intercettato, anche senza matching.
+ * Per scaricare: DISABLE, poi rmmod dopo il rilascio dei riferimenti.
+ */
 #define ST_IOCTL_SYSCALL_ADD \
     _IOW(ST_IOCTL_MAGIC, 0x30, struct st_syscall_request)
 
@@ -331,22 +271,19 @@ struct st_statistics_snapshot {
 #define ST_IOCTL_SYSCALL_LIST \
     _IOWR(ST_IOCTL_MAGIC, 0x33, struct st_syscall_list_request)
 
-/*
- * Configurazione del limite globale di ammissioni.
- */
+
+ // Configurazione del limite globale di ammissioni.
 #define ST_IOCTL_MAX_SET \
     _IOW(ST_IOCTL_MAGIC, 0x40, struct st_max_config)
 
 #define ST_IOCTL_MAX_GET \
     _IOR(ST_IOCTL_MAGIC, 0x41, struct st_max_config)
 
-/*
- * Consultazione e reset delle statistiche.
- *
- * STATS_GET è pubblico e restituisce uno snapshot coerente.
- * STATS_RESET non trasferisce dati ed è riservato a root.
- * Restituisce EBUSY anche durante la contabilizzazione di una decisione,
- * oltre che in presenza di attese contabilizzate nel limiter.
+
+ // Consultazione e reset delle statistiche.
+/* STATS_GET e pubblico; STATS_RESET richiede EUID root.
+ * Il reset restituisce EBUSY anche con decisioni in contabilizzazione,
+ * oltre che con waiter presenti o sessione in chiusura.
  */
 #define ST_IOCTL_STATS_GET \
     _IOR(ST_IOCTL_MAGIC, 0x50, struct st_statistics_snapshot)
