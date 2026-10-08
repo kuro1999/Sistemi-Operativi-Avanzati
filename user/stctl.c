@@ -55,38 +55,47 @@ static void print_usage(const char *program_name)
             program_name);
 }
 
-static int parse_uid(const char *text, __u32 *uid)
+/* Solo cifre decimali; il limite dipende dal tipo richiesto. */
+static int parse_decimal(const char *text, uint64_t limit, uint64_t *out)
 {
-    const char *cursor;
     char *end;
     unsigned long long value;
 
-    if (text == NULL || text[0] == '\0')
+    if (text == NULL || out == NULL || text[0] == '\0')
         return -1;
 
-    /*
-     * Accettiamo esclusivamente cifre decimali.
-     *
-     * In questo modo rifiutiamo valori negativi, spazi,
-     * suffissi e rappresentazioni non decimali.
-     */
-    for (cursor = text; *cursor != '\0'; cursor++) {
-        if (*cursor < '0' || *cursor > '9')
+    for (const char *p = text; *p != '\0'; p++)
+        if (*p < '0' || *p > '9')
             return -1;
-    }
 
     errno = 0;
     value = strtoull(text, &end, 10);
-
-    if (errno == ERANGE ||
-        end == text ||
-        *end != '\0' ||
-        value > UINT32_MAX) {
+    if (errno == ERANGE || end == text || *end != '\0' || value > limit)
         return -1;
-    }
 
-    *uid = (__u32)value;
+    *out = (uint64_t)value;
     return 0;
+}
+
+static int parse_uid(const char *text, __u32 *out)
+{
+    uint64_t value;
+
+    if (out == NULL || parse_decimal(text, UINT32_MAX, &value) != 0)
+        return -1;
+
+    *out = (__u32)value;
+    return 0;
+}
+
+static int parse_syscall_number(const char *text, __u32 *out)
+{
+    return parse_uid(text, out);
+}
+
+static int parse_max_invocations(const char *text, uint64_t *out)
+{
+    return parse_decimal(text, UINT64_MAX, out);
 }
 
 static int execute_ping(int fd)
@@ -350,90 +359,6 @@ static int execute_uid_list(int fd)
     return 1;
 }
 
-
-static int parse_syscall_number(const char *text, __u32 *number)
-{
-    const char *cursor;
-    char *end;
-    unsigned long long value;
-
-    if (text == NULL || number == NULL || text[0] == '\0')
-        return -1;
-
-    /*
-     * Accettiamo esclusivamente cifre decimali.
-     *
-     * Vengono quindi rifiutati:
-     *
-     *     numeri negativi
-     *     segno positivo
-     *     spazi
-     *     suffissi
-     *     notazioni non decimali
-     */
-    for (cursor = text; *cursor != '\0'; cursor++) {
-        if (*cursor < '0' || *cursor > '9')
-            return -1;
-    }
-
-    errno = 0;
-    end = NULL;
-    value = strtoull(text, &end, 10);
-
-    if (errno == ERANGE ||
-        end == text ||
-        *end != '\0' ||
-        value > UINT32_MAX) {
-        return -1;
-    }
-
-    /*
-     * Il limite architetturale NR_syscalls viene controllato
-     * dal kernel, perché dipende dal kernel in esecuzione.
-     */
-    *number = (__u32)value;
-
-    return 0;
-}
-
-static int parse_max_invocations(const char *text,
-                                 uint64_t *max_invocations)
-{
-    const char *cursor;
-    char *end;
-    unsigned long long value;
-
-    if (text == NULL ||
-        max_invocations == NULL ||
-        text[0] == '\0') {
-        return -1;
-    }
-
-    /*
-     * Accettiamo esclusivamente cifre decimali.
-     *
-     * Sono quindi esclusi segni, spazi, suffissi e
-     * rappresentazioni esadecimali o frazionarie.
-     */
-    for (cursor = text; *cursor != '\0'; cursor++) {
-        if (*cursor < '0' || *cursor > '9')
-            return -1;
-    }
-
-    errno = 0;
-    end = NULL;
-    value = strtoull(text, &end, 10);
-
-    if (errno == ERANGE ||
-        end == text ||
-        *end != '\0') {
-        return -1;
-    }
-
-    *max_invocations = (uint64_t)value;
-
-    return 0;
-}
 
 static int validate_program_name(const char *name)
 {
@@ -1157,67 +1082,44 @@ static int execute_statistics_reset(int fd)
 }
 
 
-static int is_simple_command(const char *command)
+struct simple_command {
+    const char *name;
+    int (*execute)(int fd);
+};
+
+static const struct simple_command simple_commands[] = {
+    {"ping", execute_ping},
+    {"status", execute_status},
+    {"enable", execute_enable},
+    {"disable", execute_disable},
+    {"uid-count", execute_uid_count},
+    {"uid-list", execute_uid_list},
+    {"program-count", execute_program_count},
+    {"program-list", execute_program_list},
+    {"syscall-count", execute_syscall_count},
+    {"syscall-list", execute_syscall_list},
+    {"max-get", execute_max_get},
+    {"stats", execute_statistics_get},
+    {"stats-reset", execute_statistics_reset},
+};
+
+static const struct simple_command *find_simple_command(const char *name)
 {
-    return strcmp(command, "ping") == 0 ||
-           strcmp(command, "status") == 0 ||
-           strcmp(command, "enable") == 0 ||
-           strcmp(command, "disable") == 0 ||
-           strcmp(command, "uid-count") == 0 ||
-           strcmp(command, "uid-list") == 0 ||
-           strcmp(command, "program-count") == 0 ||
-           strcmp(command, "program-list") == 0 ||
-           strcmp(command, "syscall-count") == 0 ||
-           strcmp(command, "syscall-list") == 0 ||
-           strcmp(command, "max-get") == 0 ||
-           strcmp(command, "stats") == 0 ||
-           strcmp(command, "stats-reset") == 0;
+    for (size_t i = 0; i < sizeof(simple_commands) / sizeof(simple_commands[0]); i++)
+        if (strcmp(name, simple_commands[i].name) == 0)
+            return &simple_commands[i];
+    return NULL;
 }
 
-static int execute_simple_command(
-    int fd,
-    const char *command)
+static int is_simple_command(const char *name)
 {
-    if (strcmp(command, "ping") == 0)
-        return execute_ping(fd);
+    return find_simple_command(name) != NULL;
+}
 
-    if (strcmp(command, "status") == 0)
-        return execute_status(fd);
-
-    if (strcmp(command, "enable") == 0)
-        return execute_enable(fd);
-
-    if (strcmp(command, "disable") == 0)
-        return execute_disable(fd);
-
-    if (strcmp(command, "uid-count") == 0)
-        return execute_uid_count(fd);
-
-    if (strcmp(command, "uid-list") == 0)
-        return execute_uid_list(fd);
-
-    if (strcmp(command, "program-count") == 0)
-        return execute_program_count(fd);
-
-    if (strcmp(command, "program-list") == 0)
-        return execute_program_list(fd);
-
-    if (strcmp(command, "syscall-count") == 0)
-        return execute_syscall_count(fd);
-
-    if (strcmp(command, "syscall-list") == 0)
-        return execute_syscall_list(fd);
-
-    if (strcmp(command, "max-get") == 0)
-        return execute_max_get(fd);
-
-    if (strcmp(command, "stats") == 0)
-        return execute_statistics_get(fd);
-
-    if (strcmp(command, "stats-reset") == 0)
-        return execute_statistics_reset(fd);
-
-    return 1;
+static int execute_simple_command(int fd, const char *name)
+{
+    const struct simple_command *command = find_simple_command(name);
+    return command != NULL ? command->execute(fd) : 1;
 }
 
 static int execute_syscall_add(int fd, __u32 number)
