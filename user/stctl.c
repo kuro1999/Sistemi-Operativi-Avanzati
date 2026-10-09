@@ -25,21 +25,6 @@ static int ioctl_failed(const char *name)
     return fail("ioctl %s fallita: %s\n", name, strerror(errno));
 }
 
-static void print_usage(const char *program_name)
-{
-    static const char *const syntax[] = {
-        "ping", "status", "enable", "disable",
-        "uid-add <UID>", "uid-remove <UID>", "uid-count", "uid-list",
-        "program-add <nome>", "program-remove <nome>", "program-count", "program-list",
-        "syscall-add <numero>", "syscall-remove <numero>", "syscall-count", "syscall-list",
-        "max-set <valore>", "max-get", "stats", "stats-reset",
-    };
-
-    fprintf(stderr, "Uso:\n");
-    for (size_t i = 0; i < sizeof(syntax) / sizeof(syntax[0]); i++)
-        fprintf(stderr, "  %s %s\n", program_name, syntax[i]);
-}
-
 static int parse_decimal(const char *text, uint64_t limit, uint64_t *out)
 {
     char *end;
@@ -59,17 +44,6 @@ static int parse_decimal(const char *text, uint64_t limit, uint64_t *out)
         return -1;
 
     *out = (uint64_t)value;
-    return 0;
-}
-
-static int parse_u32(const char *text, __u32 *out)
-{
-    uint64_t value;
-
-    if (out == NULL || parse_decimal(text, UINT32_MAX, &value) != 0)
-        return -1;
-
-    *out = (__u32)value;
     return 0;
 }
 
@@ -437,37 +411,6 @@ static int execute_registry(int fd, enum registry kind, int list)
     return fail("%s", info->unstable_error);
 }
 
-struct simple_command {
-    const char *name;
-    int (*execute)(int fd);
-    enum registry registry;
-    int list;
-};
-
-static const struct simple_command simple_commands[] = {
-    {"ping", execute_ping, 0, 0},
-    {"status", execute_status, 0, 0},
-    {"enable", execute_enable, 0, 0},
-    {"disable", execute_disable, 0, 0},
-    {"uid-count", NULL, REG_UID, 0},
-    {"uid-list", NULL, REG_UID, 1},
-    {"program-count", NULL, REG_PROGRAM, 0},
-    {"program-list", NULL, REG_PROGRAM, 1},
-    {"syscall-count", NULL, REG_SYSCALL, 0},
-    {"syscall-list", NULL, REG_SYSCALL, 1},
-    {"max-get", execute_max_get, 0, 0},
-    {"stats", execute_statistics_get, 0, 0},
-    {"stats-reset", execute_statistics_reset, 0, 0},
-};
-
-static const struct simple_command *find_simple_command(const char *name)
-{
-    for (size_t i = 0; i < sizeof(simple_commands) / sizeof(simple_commands[0]); i++)
-        if (strcmp(name, simple_commands[i].name) == 0)
-            return &simple_commands[i];
-    return NULL;
-}
-
 static int execute_syscall_update(int fd, __u32 number, int add)
 {
     struct st_syscall_request request = {.number = number, .reserved = 0U};
@@ -493,115 +436,104 @@ static int execute_syscall_update(int fd, __u32 number, int add)
     return 0;
 }
 
-enum operation {
-    OP_SIMPLE,
-    OP_UID_ADD, OP_UID_REMOVE,
-    OP_PROGRAM_ADD, OP_PROGRAM_REMOVE,
-    OP_SYSCALL_ADD, OP_SYSCALL_REMOVE,
-    OP_MAX_SET
+enum operation { OP_SIMPLE, OP_COUNT, OP_LIST, OP_UID, OP_PROGRAM, OP_SYSCALL, OP_MAX_SET };
+
+/* Una sola tabella definisce sintassi, argomenti e operazione di ogni comando.
+ * option indica il registro per COUNT/LIST, oppure add=1/remove=0 per gli update. */
+static const struct command {
+    const char *name, *argument;
+    enum operation operation;
+    int option;
+    int (*execute)(int fd);
+} commands[] = {
+    {"ping",           NULL,       OP_SIMPLE,  0,           execute_ping},
+    {"status",         NULL,       OP_SIMPLE,  0,           execute_status},
+    {"enable",         NULL,       OP_SIMPLE,  0,           execute_enable},
+    {"disable",        NULL,       OP_SIMPLE,  0,           execute_disable},
+    {"uid-add",        "<UID>",    OP_UID,     1,           NULL},
+    {"uid-remove",     "<UID>",    OP_UID,     0,           NULL},
+    {"uid-count",      NULL,       OP_COUNT,   REG_UID,     NULL},
+    {"uid-list",       NULL,       OP_LIST,    REG_UID,     NULL},
+    {"program-add",    "<nome>",   OP_PROGRAM, 1,           NULL},
+    {"program-remove", "<nome>",   OP_PROGRAM, 0,           NULL},
+    {"program-count",  NULL,       OP_COUNT,   REG_PROGRAM, NULL},
+    {"program-list",   NULL,       OP_LIST,    REG_PROGRAM, NULL},
+    {"syscall-add",    "<numero>", OP_SYSCALL, 1,           NULL},
+    {"syscall-remove", "<numero>", OP_SYSCALL, 0,           NULL},
+    {"syscall-count",  NULL,       OP_COUNT,   REG_SYSCALL, NULL},
+    {"syscall-list",   NULL,       OP_LIST,    REG_SYSCALL, NULL},
+    {"max-set",        "<valore>", OP_MAX_SET, 0,           NULL},
+    {"max-get",        NULL,       OP_SIMPLE,  0,           execute_max_get},
+    {"stats",          NULL,       OP_SIMPLE,  0,           execute_statistics_get},
+    {"stats-reset",    NULL,       OP_SIMPLE,  0,           execute_statistics_reset},
 };
 
-static const struct {
-    const char *name;
-    enum operation operation;
-} argument_commands[] = {
-    {"uid-add", OP_UID_ADD},
-    {"uid-remove", OP_UID_REMOVE},
-    {"program-add", OP_PROGRAM_ADD},
-    {"program-remove", OP_PROGRAM_REMOVE},
-    {"syscall-add", OP_SYSCALL_ADD},
-    {"syscall-remove", OP_SYSCALL_REMOVE},
-    {"max-set", OP_MAX_SET},
-};
+static void print_usage(const char *program_name)
+{
+    fprintf(stderr, "Uso:\n");
+    for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
+        fprintf(stderr, "  %s %s%s%s\n", program_name, commands[i].name,
+                commands[i].argument ? " " : "", commands[i].argument ? commands[i].argument : "");
+}
+
+static const struct command *find_command(const char *name)
+{
+    for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
+        if (strcmp(name, commands[i].name) == 0)
+            return &commands[i];
+    return NULL;
+}
+
+static int execute_command(int fd, const struct command *command, const char *text, uint64_t value)
+{
+    switch (command->operation) {
+    case OP_SIMPLE:
+        return command->execute(fd);
+    case OP_COUNT:
+    case OP_LIST:
+        return execute_registry(fd, command->option, command->operation == OP_LIST);
+    case OP_UID:
+        return execute_uid_update(fd, (__u32)value, command->option);
+    case OP_PROGRAM:
+        return execute_program_update(fd, text, command->option);
+    case OP_SYSCALL:
+        return execute_syscall_update(fd, (__u32)value, command->option);
+    case OP_MAX_SET:
+        return execute_max_set(fd, value);
+    }
+    return 1;
+}
 
 int main(int argc, char *argv[])
 {
-    const struct simple_command *simple = NULL;
-    enum operation operation = OP_SIMPLE;
-    __u32 number = 0U;
-    uint64_t max_invocations = 0U;
-    const char *invalid = NULL;
+    const struct command *command;
+    const char *text = argc == 3 ? argv[2] : NULL;
+    uint64_t value = 0;
     int fd, result;
 
-    if (argc == 2) {
-        simple = find_simple_command(argv[1]);
-        if (simple == NULL)
-            goto usage;
-    } else if (argc == 3) {
-        size_t i;
-        for (i = 0; i < sizeof(argument_commands) / sizeof(argument_commands[0]); i++) {
-            if (strcmp(argv[1], argument_commands[i].name) == 0) {
-                operation = argument_commands[i].operation;
-                break;
-            }
+    if (argc < 2 || argc > 3 || !(command = find_command(argv[1])) ||
+        argc != (command->argument ? 3 : 2)) {
+        print_usage(argv[0]);
+        return 1;
+    }
+    if (command->argument) {
+        if (command->operation == OP_PROGRAM) {
+            if (validate_program_name(text) != 0)
+                return fail("Nome programma non valido: %s\n", text);
+        } else if (parse_decimal(text, command->operation == OP_MAX_SET ? UINT64_MAX : UINT32_MAX,
+                                 &value) != 0) {
+            const char *invalid = command->operation == OP_UID ? "UID non valido" :
+                command->operation == OP_SYSCALL ? "Numero di system call non valido" : "Valore MAX non valido";
+            return fail("%s: %s\n", invalid, text);
         }
-        if (operation == OP_SIMPLE)
-            goto usage;
-
-        switch (operation) {
-        case OP_UID_ADD:
-        case OP_UID_REMOVE:
-            if (parse_u32(argv[2], &number) != 0)
-                invalid = "UID non valido";
-            break;
-        case OP_SYSCALL_ADD:
-        case OP_SYSCALL_REMOVE:
-            if (parse_u32(argv[2], &number) != 0)
-                invalid = "Numero di system call non valido";
-            break;
-        case OP_PROGRAM_ADD:
-        case OP_PROGRAM_REMOVE:
-            if (validate_program_name(argv[2]) != 0)
-                invalid = "Nome programma non valido";
-            break;
-        case OP_MAX_SET:
-            if (parse_decimal(argv[2], UINT64_MAX, &max_invocations) != 0)
-                invalid = "Valore MAX non valido";
-            break;
-        case OP_SIMPLE:
-            goto usage;
-        }
-        if (invalid != NULL)
-            return fail("%s: %s\n", invalid, argv[2]);
-    } else {
-        goto usage;
     }
 
     /* Nessun accesso al device prima della validazione completa degli argomenti. */
     fd = open(ST_DEVICE_PATH, O_RDWR);
     if (fd == -1)
         return fail("Impossibile aprire %s: %s\n", ST_DEVICE_PATH, strerror(errno));
-
-    switch (operation) {
-    case OP_UID_ADD:
-    case OP_UID_REMOVE:
-        result = execute_uid_update(fd, number, operation == OP_UID_ADD);
-        break;
-    case OP_PROGRAM_ADD:
-    case OP_PROGRAM_REMOVE:
-        result = execute_program_update(fd, argv[2], operation == OP_PROGRAM_ADD);
-        break;
-    case OP_SYSCALL_ADD:
-    case OP_SYSCALL_REMOVE:
-        result = execute_syscall_update(fd, number, operation == OP_SYSCALL_ADD);
-        break;
-    case OP_MAX_SET:
-        result = execute_max_set(fd, max_invocations);
-        break;
-    case OP_SIMPLE:
-        result = simple->execute ? simple->execute(fd)
-                                 : execute_registry(fd, simple->registry, simple->list);
-        break;
-    default:
-        result = 1;
-        break;
-    }
-
+    result = execute_command(fd, command, text, value);
     if (close(fd) == -1)
         return fail("Chiusura di %s fallita: %s\n", ST_DEVICE_PATH, strerror(errno));
     return result;
-
-usage:
-    print_usage(argv[0]);
-    return 1;
 }
