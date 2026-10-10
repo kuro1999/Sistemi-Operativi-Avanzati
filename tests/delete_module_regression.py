@@ -113,7 +113,6 @@ def run_case(binary, target, expected):
 
         report, fields, counts, elapsed = snapshot(1)
         check(counts == (1, 1, 1, 0, 0, 1), report)
-        check(int(fields["System call del peak"]) == 176, report)
         check(int(fields["Effective UID del peak"]) == 0, report)
         check(fields["Programma del peak"] == NAME, report)
         peak = int(fields["Peak delay"].split()[0])

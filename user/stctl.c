@@ -212,14 +212,12 @@ static int execute_statistics_get(int fd)
 
     if (snapshot.peak_valid == 0U) {
         printf("Peak delay: non disponibile\n");
-        printf("System call del peak: non disponibile\n");
         printf("Effective UID del peak: non disponibile\n");
         printf("Programma del peak: non disponibile\n");
     } else {
         printf("Peak delay: %llu ns (%.6f ms)\n",
                (unsigned long long)snapshot.peak_delay_ns,
                (double)snapshot.peak_delay_ns / 1000000.0);
-        printf("System call del peak: %u\n", snapshot.peak_syscall_nr);
         printf("Effective UID del peak: %u\n", snapshot.peak_euid);
         printf("Programma del peak: %s\n", snapshot.peak_program);
     }

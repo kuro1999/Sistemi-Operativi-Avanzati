@@ -120,7 +120,6 @@ def run(binary):
               "Il byte non e' stato consumato")
 
         _, fields, _, _ = snapshot(2)
-        check(int(fields["System call del peak"]) == 0, report)
         check(int(fields["Effective UID del peak"]) == os.geteuid(),
               report)
         check(fields["Programma del peak"] == NAME, report)

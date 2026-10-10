@@ -81,8 +81,8 @@ La media temporale dei thread bloccati è:
 
 `integrale del numero di thread bloccati / durata dell'osservazione`.
 
-La media dei ritardi individuali non viene esposta. Il peak riporta anche
-numero di syscall, programma ed EUID associati.
+La media dei ritardi individuali non viene esposta. Il peak riporta
+programma ed EUID associati.
 
 DISABLE attende la contabilizzazione dei waiter rilasciati, senza attendere
 il completamento delle syscall originali. Lo snapshot successivo è stabile.
@@ -262,7 +262,7 @@ locali rimuovendo solo il test del reset manuale. Ricompilare modulo, CLI e test
 
 La CLI non espone piu il ritardo medio delle chiamate bloccate e lo snapshot
 non contiene piu `total_delay_ns`. Restano il contatore delle attese completate,
-il peak delay con la relativa identita e syscall, la media temporale e il picco
+il peak delay con la relativa identita, la media temporale e il picco
 del numero di thread bloccati. La misura del singolo ritardo resta necessaria
 per aggiornare il peak.
 
@@ -271,3 +271,21 @@ Gli altri 18 comandi ioctl restano invariati. Scaricare il vecchio modulo
 prima della sostituzione; ricompilare modulo, CLI e test insieme.
 Le 20 regressioni esistenti e lo stress test restano applicabili senza modifiche:
 non dipendono dalla riga di output rimossa.
+
+
+## Rimozione del numero di syscall del peak — 10 ottobre 2026
+
+Le statistiche conservano peak delay, nome del programma ed EUID richiesti
+dalla traccia. Il numero di syscall del peak non viene piu memorizzato o
+esposto. La selezione delle syscall nel registro e nell'hook resta invariata.
+I test conservano le prove sulle syscall reali, tempi, identita e contatori;
+vengono eliminate soltanto le asserzioni sul campo rimosso.
+
+Su x86-64 lo snapshot resta di 336 byte per l'allineamento, ma cambiano gli
+offset di EUID, flag e nome del programma. STATS_GET passa percio dal numero
+0x50 a 0x52, evitando che vecchi binari interpretino silenziosamente un layout
+diverso. Il vecchio 0x50 e il precedente reset 0x51 non vengono riutilizzati.
+Tutti gli altri comandi restano invariati. Il vecchio comando non e piu una
+ioctl amministrativa riconosciuta: raggiunto il dispatcher restituisce ENOTTY.
+Ricompilare e distribuire modulo, CLI e test insieme. Le 20 regressioni e lo
+stress test vanno eseguiti usando i sorgenti aggiornati.

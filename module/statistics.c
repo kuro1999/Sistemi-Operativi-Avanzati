@@ -36,7 +36,6 @@ struct st_statistics_state {
     u32 current_blocked;
     u32 peak_blocked;
 
-    u32 peak_syscall_nr;
     kuid_t peak_euid;
     char peak_program[ST_PROGRAM_NAME_CAPACITY];
 
@@ -238,7 +237,7 @@ u64 st_statistics_record_relevant_invocation(void)
 }
 
 bool st_statistics_block_begin(struct st_statistics_block_context *context,
-    u64 invocation_generation, u64 throttle_start_ns, unsigned int syscall_nr,
+    u64 invocation_generation, u64 throttle_start_ns,
     kuid_t effective_uid, const char *program_name)
 {
     unsigned long flags;
@@ -248,7 +247,6 @@ bool st_statistics_block_begin(struct st_statistics_block_context *context,
     if (context == NULL)
         return false;
     memset(context, 0, sizeof(*context));
-    context->syscall_nr = syscall_nr;
     context->effective_uid = effective_uid;
     if (program_name != NULL) {
         strscpy(context->program_name, program_name, sizeof(context->program_name));
@@ -334,7 +332,6 @@ static void st_statistics_block_finish(struct st_statistics_block_context *conte
     if (!st_statistics.peak_valid || delay_ns > st_statistics.peak_delay_ns) {
         st_statistics.peak_valid = true;
         st_statistics.peak_delay_ns = delay_ns;
-        st_statistics.peak_syscall_nr = context->syscall_nr;
         st_statistics.peak_euid = context->effective_uid;
         strscpy(st_statistics.peak_program, context->program_name, sizeof(st_statistics.peak_program));
     }
@@ -386,7 +383,6 @@ void st_statistics_get_snapshot(struct st_statistics_snapshot *snapshot)
     snapshot->peak_delay_ns = st_statistics.peak_delay_ns;
     snapshot->current_blocked = st_statistics.current_blocked;
     snapshot->peak_blocked = st_statistics.peak_blocked;
-    snapshot->peak_syscall_nr = st_statistics.peak_syscall_nr;
     snapshot->peak_valid = st_statistics.peak_valid ? 1U : 0U;
     snapshot->session_active = st_statistics.session_active ? 1U : 0U;
     if (st_statistics.peak_valid) {

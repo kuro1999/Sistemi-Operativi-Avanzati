@@ -61,7 +61,6 @@ def run(binary):
             "Attese interrotte da segnale": 0,
             "Thread attualmente bloccati": 0,
             "Picco thread bloccati": 1,
-            "System call del peak": 0,
             "Effective UID del peak": os.geteuid(),
         }.items():
             check(int(fields[key]) == expected, frozen)

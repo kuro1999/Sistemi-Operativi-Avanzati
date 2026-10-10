@@ -23,7 +23,6 @@ def peak_in_session(text, fields, elapsed):
     # Durata osservazione e' stampata con sei decimali.
     check(0 <= peak <= round(elapsed * 1_000_000_000) + 2000,
           "FAIL: il peak comprende tempo precedente alla sessione:\n" + text)
-    check(int(fields["System call del peak"]) == 35, text)
     check(int(fields["Effective UID del peak"]) == os.geteuid(), text)
     check(fields["Programma del peak"] == "syscall_hook_smoke", text)
 

@@ -1,3 +1,7 @@
+> **Aggiornamento (10 ottobre 2026):** il numero di syscall del peak e stato
+> rimosso dalle statistiche. Il vecchio layout e il numero ioctl STATS_GET
+> descritti qui sono storici; consultare la guida corrente e l'header UAPI.
+
 > **Aggiornamento (10 ottobre 2026):** il ritardo medio delle chiamate bloccate
 > e il campo `total_delay_ns` sono stati rimossi. Gli esempi di questa metrica
 > e del precedente layout dello snapshot restano soltanto storici.

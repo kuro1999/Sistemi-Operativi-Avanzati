@@ -78,7 +78,6 @@ def run_case(n):
         completed = int(fields["Invocazioni bloccate completate"])
         check(completed == n, frozen)
         check(int(fields["Peak delay"].split()[0]) > 0, frozen)
-        check(int(fields["System call del peak"]) == 35, frozen)
         check(int(fields["Effective UID del peak"]) == os.geteuid(), frozen)
         check(fields["Programma del peak"] == "syscall_hook_smoke", frozen)
 

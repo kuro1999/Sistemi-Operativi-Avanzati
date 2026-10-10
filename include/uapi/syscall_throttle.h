@@ -158,7 +158,6 @@ struct st_statistics_snapshot {
     __u32 current_blocked;
     __u32 peak_blocked;
 
-    __u32 peak_syscall_nr;
     __u32 peak_euid;
 
     __u32 peak_valid;
@@ -252,9 +251,9 @@ struct st_statistics_snapshot {
 #define ST_IOCTL_MAX_GET \
     _IOR(ST_IOCTL_MAGIC, 0x41, struct st_max_config)
 
-/* Consultazione pubblica delle statistiche. */
+/* Consultazione pubblica: 0x50 ritirato per il precedente layout del peak. */
 #define ST_IOCTL_STATS_GET \
-    _IOR(ST_IOCTL_MAGIC, 0x50, struct st_statistics_snapshot)
+    _IOR(ST_IOCTL_MAGIC, 0x52, struct st_statistics_snapshot)
 
 /* 0x51 non riutilizzato: apparteneva al comando di reset manuale rimosso. */
 

@@ -21,7 +21,6 @@ struct st_statistics_block_context {
     u64 start_ns;
 
     kuid_t effective_uid;
-    unsigned int syscall_nr;
 
     char program_name[ST_PROGRAM_NAME_CAPACITY];
 
@@ -85,7 +84,6 @@ bool st_statistics_block_begin(
     struct st_statistics_block_context *context,
     u64 invocation_generation,
     u64 throttle_start_ns,
-    unsigned int syscall_nr,
     kuid_t effective_uid,
     const char *program_name);
 

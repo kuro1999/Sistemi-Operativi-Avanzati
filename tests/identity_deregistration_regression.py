@@ -61,7 +61,6 @@ def run_case(label, identities, order, uid, gid):
         assert counters == (1, 1, 1, 0, 0, 1), text
         assert int(fields["Effective UID del peak"]) == uid, text
         assert fields["Programma del peak"] == "syscall_hook_smoke", text
-        assert int(fields["System call del peak"]) == 35, text
         print("PASS: " + label, flush=True)
     finally:
         errors = []

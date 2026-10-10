@@ -102,7 +102,6 @@ def run_case(n):
 
         text, f, counters, elapsed = snapshot(n)
         assert counters == (n, n, n, 0, 0, n), text
-        assert int(f["System call del peak"]) == 35, text
         assert int(f["Effective UID del peak"]) == os.geteuid(), text
         assert f["Programma del peak"] == "syscall_hook_smoke", text
         peak = int(f["Peak delay"].split()[0])

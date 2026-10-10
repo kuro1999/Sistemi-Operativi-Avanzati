@@ -107,7 +107,6 @@ def run_case(binary, nr, extra_threads):
 
         text, fields, counts, elapsed = snapshot(1)
         check(counts == (1, 1, 1, 0, 0, 1), text)
-        check(int(fields["System call del peak"]) == nr, text)
         check(int(fields["Effective UID del peak"]) == os.geteuid(), text)
         check(fields["Programma del peak"] == NAME, text)
         peak = int(fields["Peak delay"].split()[0])

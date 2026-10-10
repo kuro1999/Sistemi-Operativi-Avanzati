@@ -702,7 +702,7 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
                 }
 
                 st_statistics_block_begin(&statistics_context, statistics_generation, throttle_start_ns,
-                    syscall_nr, blocked_euid, statistics_program_name);
+                    blocked_euid, statistics_program_name);
             }
 
             wait_ret = st_rate_limiter_wait_for_change(observed_generation);
