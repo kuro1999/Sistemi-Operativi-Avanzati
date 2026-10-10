@@ -219,3 +219,20 @@ Prima della consegna:
 3. Consolidare il confronto requisito-per-requisito e i limiti di piattaforma:
    percorso nativo x86-64, header, Ftrace/Kprobes e configurazione kernel.
    Il numero di hook installati non dimostra il comportamento di ogni syscall.
+
+
+## UAPI senza campi di estensione — 10 ottobre 2026
+
+I campi `reserved` sono stati rimossi dalle 12 strutture UAPI che li contenevano.
+Driver, controller e stress test non li inizializzano o verificano piu.
+Restano le validazioni sui dati effettivi, i privilegi root e l'azzeramento
+necessario delle risposte; budget, sincronizzazione e statistiche non cambiano.
+
+La modifica cambia le dimensioni delle strutture e i valori dei 16 comandi
+ioctl che le trasferiscono. PING, ENABLE, DISABLE e STATS_RESET restano invariati.
+I vecchi binari non sono compatibili: scaricare il modulo precedente prima
+di sostituire i file, ricompilare modulo, controller e test, quindi caricare
+il nuovo modulo ed eseguire le regressioni. Non mescolare le due versioni.
+Le macro nell'header UAPI sono la fonte dei numeri ioctl; non usare costanti
+copiate dalla vecchia interfaccia. I documenti di milestone conservano gli
+esempi storici, identificati come tali.

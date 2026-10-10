@@ -1,3 +1,8 @@
+> **UAPI aggiornata (10 ottobre 2026):** i campi `reserved` sono stati rimossi.
+> Gli esempi e i controlli relativi a questi campi in questo documento descrivono
+> la vecchia interfaccia. Per quella corrente usare `include/uapi/syscall_throttle.h`
+> e [Comportamento e test](COMPORTAMENTO_E_TEST.md).
+
 > Aggiornamento del 6 ottobre 2026: la race `relevant/reset`
 > elencata tra le limitazioni storiche è stata corretta mediante
 > protezione delle invocazioni ancora in fase di decisione.

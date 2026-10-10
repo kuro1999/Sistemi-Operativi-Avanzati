@@ -65,7 +65,6 @@ static void execute_max_set(unsigned int index,
     struct st_max_config configuration = {
         .max_invocations =
             ((__u64)index << 32) | (__u64)iteration,
-        .reserved = {0U, 0U},
     };
 
     errno = 0;
@@ -81,7 +80,6 @@ static void execute_max_get(unsigned int index)
 {
     struct st_max_config response = {
         .max_invocations = 0U,
-        .reserved = {0U, 0U},
     };
 
     errno = 0;
@@ -92,18 +90,12 @@ static void execute_max_get(unsigned int index)
         record_error(index, "MAX_GET", errno);
         return;
     }
-
-    if (response.reserved[0] != 0U ||
-        response.reserved[1] != 0U) {
-        record_error(index, "MAX_GET reserved", EPROTO);
-    }
 }
 
 static void execute_status_get(unsigned int index)
 {
     struct st_monitor_status response = {
         .enabled = 0U,
-        .reserved = 0U,
     };
 
     errno = 0;
@@ -115,8 +107,7 @@ static void execute_status_get(unsigned int index)
         return;
     }
 
-    if (response.reserved != 0U ||
-        response.enabled > 1U) {
+    if (response.enabled > 1U) {
         record_error(index, "GET_STATUS response", EPROTO);
     }
 }
@@ -175,15 +166,12 @@ static int verify_final_state(void)
 {
     struct st_max_config configuration = {
         .max_invocations = FINAL_MAX,
-        .reserved = {0U, 0U},
     };
     struct st_max_config max_response = {
         .max_invocations = 0U,
-        .reserved = {0U, 0U},
     };
     struct st_monitor_status status = {
         .enabled = 0U,
-        .reserved = 0U,
     };
 
     if (ioctl(device_fd,
@@ -221,10 +209,7 @@ static int verify_final_state(void)
     }
 
     if (max_response.max_invocations != FINAL_MAX ||
-        max_response.reserved[0] != 0U ||
-        max_response.reserved[1] != 0U ||
-        status.enabled != 1U ||
-        status.reserved != 0U) {
+        status.enabled != 1U) {
         fprintf(stderr,
                 "Stato finale attivo incoerente: "
                 "MAX=%llu enabled=%u.\n",
@@ -257,10 +242,7 @@ static int verify_final_state(void)
     }
 
     if (status.enabled != 0U ||
-        status.reserved != 0U ||
-        max_response.max_invocations != FINAL_MAX ||
-        max_response.reserved[0] != 0U ||
-        max_response.reserved[1] != 0U) {
+        max_response.max_invocations != FINAL_MAX) {
         fprintf(stderr,
                 "Stato finale disattivato incoerente: "
                 "MAX=%llu enabled=%u.\n",

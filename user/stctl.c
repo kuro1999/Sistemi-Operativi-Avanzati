@@ -88,7 +88,7 @@ static int execute_disable(int fd)
 
 static int execute_uid_update(int fd, __u32 uid, int add)
 {
-    struct st_uid_request request = {.uid = uid, .reserved = 0U};
+    struct st_uid_request request = {.uid = uid};
     unsigned long command = add ? ST_IOCTL_UID_ADD : ST_IOCTL_UID_REMOVE;
 
     if (ioctl(fd, command, &request) == -1) {
@@ -165,9 +165,6 @@ static int execute_max_get(int fd)
     if (ioctl(fd, ST_IOCTL_MAX_GET, &response) == -1)
         return ioctl_failed("ST_IOCTL_MAX_GET");
 
-    if (response.reserved[0] != 0U || response.reserved[1] != 0U)
-        return fail("Il driver ha restituito una risposta MAX_GET non valida.\n");
-
     printf("MAX: %llu invocazioni per finestra globale di un secondo.\n",
            (unsigned long long)response.max_invocations);
 
@@ -179,15 +176,9 @@ static int execute_statistics_get(int fd)
     struct st_statistics_snapshot snapshot = {0};
     double average_blocked;
     double average_delay_ms;
-    unsigned int index;
 
     if (ioctl(fd, ST_IOCTL_STATS_GET, &snapshot) == -1)
         return ioctl_failed("ST_IOCTL_STATS_GET");
-
-    for (index = 0; index < sizeof(snapshot.reserved) / sizeof(snapshot.reserved[0]); index++)
-        if (snapshot.reserved[index] != 0U)
-            return fail("Snapshot statistiche non valido: reserved[%u]=%u.\n",
-                        index, snapshot.reserved[index]);
 
     if (snapshot.peak_valid > 1U || snapshot.session_active > 1U)
         return fail("Snapshot statistiche non valido: flag fuori dominio.\n");
@@ -290,39 +281,32 @@ static const struct registry_info {
 static int read_count(int fd, enum registry kind, __u32 *count)
 {
     int result;
-    __u32 reserved;
 
     if (kind == REG_UID) {
         struct st_uid_count response = {0};
         result = ioctl(fd, ST_IOCTL_UID_GET_COUNT, &response);
         *count = response.count;
-        reserved = 0; /* UID_GET_COUNT non validava reserved. */
     } else if (kind == REG_PROGRAM) {
         struct st_program_count response = {0};
         result = ioctl(fd, ST_IOCTL_PROGRAM_GET_COUNT, &response);
         *count = response.count;
-        reserved = response.reserved;
     } else {
         struct st_syscall_count response = {0};
         result = ioctl(fd, ST_IOCTL_SYSCALL_GET_COUNT, &response);
         *count = response.count;
-        reserved = response.reserved;
     }
     if (result == -1)
         return fail("ioctl ST_IOCTL_%s_GET_COUNT fallita: %s\n",
                     registries[kind].ioctl_name, strerror(errno));
-    if (reserved)
-        return fail("Risposta %s_GET_COUNT non valida.\n", registries[kind].ioctl_name);
     return 0;
 }
 
 static int read_list(int fd, enum registry kind, void *items, __u32 capacity,
-                     __u32 *count, int *bad_reserved)
+                     __u32 *count)
 {
     __u64 pointer = (__u64)(uintptr_t)items;
     int result;
 
-    *bad_reserved = 0;
     if (kind == REG_UID) {
         struct st_uid_list_request request = {.uids_ptr = pointer, .capacity = capacity};
         result = ioctl(fd, ST_IOCTL_UID_LIST, &request);
@@ -335,7 +319,6 @@ static int read_list(int fd, enum registry kind, void *items, __u32 capacity,
         struct st_syscall_list_request request = {.numbers_ptr = pointer, .capacity = capacity};
         result = ioctl(fd, ST_IOCTL_SYSCALL_LIST, &request);
         *count = request.count;
-        *bad_reserved = request.reserved[0] || request.reserved[1];
     }
     return result;
 }
@@ -384,16 +367,12 @@ static int execute_registry(int fd, enum registry kind, int list)
     for (unsigned int attempt = 0; attempt < 4; attempt++) {
         void *items = capacity ? calloc(capacity, info->item_size) : NULL;
         __u32 count;
-        int bad_reserved, result, saved_errno;
+        int result, saved_errno;
 
         if (capacity && !items)
             return fail(info->allocation_error, capacity);
-        result = read_list(fd, kind, items, capacity, &count, &bad_reserved);
+        result = read_list(fd, kind, items, capacity, &count);
         saved_errno = errno;
-        if (bad_reserved) {
-            free(items);
-            return fail("Risposta SYSCALL_LIST non valida: campi reserved modificati.\n");
-        }
         if (result == 0) {
             result = count > capacity ? fail("%s", info->count_error)
                                       : print_list(kind, items, count);
@@ -413,7 +392,7 @@ static int execute_registry(int fd, enum registry kind, int list)
 
 static int execute_syscall_update(int fd, __u32 number, int add)
 {
-    struct st_syscall_request request = {.number = number, .reserved = 0U};
+    struct st_syscall_request request = {.number = number};
     unsigned long command = add ? ST_IOCTL_SYSCALL_ADD : ST_IOCTL_SYSCALL_REMOVE;
 
     if (ioctl(fd, command, &request) == -1) {

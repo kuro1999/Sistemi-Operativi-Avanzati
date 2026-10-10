@@ -75,8 +75,6 @@ static long st_ioctl_max_set(unsigned long argument)
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
-    if (request.reserved[0] || request.reserved[1])
-        return -EINVAL;
 
     /* Serializza anche la nuova osservazione statistica al cambio di MAX. */
     mutex_lock(&st_policy_lock);
@@ -122,8 +120,6 @@ static long st_ioctl_uid_update(unsigned long argument, bool add)
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
-    if (request.reserved)
-        return -EINVAL;
     /* Il registro globale interpreta gli UID nel namespace iniziale. */
     uid = make_kuid(&init_user_ns, request.uid);
     if (!uid_valid(uid))
@@ -147,8 +143,6 @@ static long st_ioctl_program_update(unsigned long argument, bool add)
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
-    if (request.reserved[0] || request.reserved[1])
-        return -EINVAL;
     /* Il registro valida il nome, inclusa la terminazione NUL. */
     return add ? st_program_registry_add(request.name)
                : st_program_registry_remove(request.name);
@@ -170,8 +164,6 @@ static long st_ioctl_syscall_update(unsigned long argument, bool add)
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
-    if (request.reserved)
-        return -EINVAL;
     return add ? st_syscall_registry_add(request.number)
                : st_syscall_registry_remove(request.number);
 }
@@ -261,8 +253,7 @@ static long st_ioctl_uid_list(unsigned long argument)
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
-    if (request.reserved[0] || request.reserved[1] ||
-        (request.capacity && !request.uids_ptr))
+    if (request.capacity && !request.uids_ptr)
         return -EINVAL;
     return st_ioctl_list_reply(argument, &request, sizeof(request), request.capacity,
         &request.count, request.uids_ptr, ST_LIST_UID);
@@ -274,8 +265,7 @@ static long st_ioctl_program_list(unsigned long argument)
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
-    if (request.reserved[0] || request.reserved[1] ||
-        (request.capacity && !request.programs_ptr))
+    if (request.capacity && !request.programs_ptr)
         return -EINVAL;
     return st_ioctl_list_reply(argument, &request, sizeof(request), request.capacity,
         &request.count, request.programs_ptr, ST_LIST_PROGRAM);
@@ -287,8 +277,7 @@ static long st_ioctl_syscall_list(unsigned long argument)
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
-    if (request.reserved[0] || request.reserved[1] ||
-        (request.capacity && !request.numbers_ptr))
+    if (request.capacity && !request.numbers_ptr)
         return -EINVAL;
     return st_ioctl_list_reply(argument, &request, sizeof(request), request.capacity,
         &request.count, request.numbers_ptr, ST_LIST_SYSCALL);
