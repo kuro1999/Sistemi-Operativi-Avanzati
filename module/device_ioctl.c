@@ -210,131 +210,88 @@ static long st_ioctl_syscall_get_count(unsigned long argument)
         ? -EFAULT : 0;
 }
 
-/* LIST: alloca sul conteggio reale, non sulla capacity fornita dall'utente.
- * Lo snapshot rilascia il lock prima delle copie user-space.
- * Se il registro cresce, ENOSPC restituisce la nuova dimensione richiesta.
+enum st_list_kind { ST_LIST_UID, ST_LIST_PROGRAM, ST_LIST_SYSCALL };
+
+/* Alloca sul conteggio reale; snapshot e copie user-space restano separati.
+ * ENOSPC comunica la dimensione richiesta anche se il registro cresce.
  */
+static long st_ioctl_list_reply(unsigned long argument, void *request, size_t request_size,
+    __u32 capacity, __u32 *count, __u64 user_items, enum st_list_kind kind)
+{
+    void *items = NULL;
+    size_t item_size = kind == ST_LIST_PROGRAM ? sizeof(struct st_program_name) : sizeof(__u32);
+    __u32 actual = 0, required = kind == ST_LIST_UID ? st_uid_registry_count() :
+        kind == ST_LIST_PROGRAM ? st_program_registry_count() : st_syscall_registry_count();
+    int ret = -ENOSPC;
+
+    *count = required;
+    if (capacity < required)
+        goto reply;
+    ret = 0;
+    /* Solo UID esegue lo snapshot anche con conteggio iniziale zero. */
+    if (!required && kind != ST_LIST_UID)
+        goto reply;
+    if (required) {
+        items = kcalloc(required, item_size, GFP_KERNEL);
+        if (!items)
+            return -ENOMEM;
+    }
+    ret = kind == ST_LIST_UID ? st_uid_registry_snapshot(items, required, &actual) :
+        kind == ST_LIST_PROGRAM ? st_program_registry_snapshot(items, required, &actual) :
+        st_syscall_registry_snapshot(items, required, &actual);
+    if (ret && ret != -ENOSPC)
+        goto out;
+    *count = actual;
+    if (!ret && actual &&
+        copy_to_user(u64_to_user_ptr(user_items), items, (size_t)actual * item_size)) {
+        ret = -EFAULT;
+        goto out;
+    }
+reply:
+    if (copy_to_user((void __user *)argument, request, request_size))
+        ret = -EFAULT;
+out:
+    kfree(items);
+    return ret;
+}
+
 static long st_ioctl_uid_list(unsigned long argument)
 {
     struct st_uid_list_request request;
-    __u32 *items = NULL, required, actual = 0;
-    int ret;
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
     if (request.reserved[0] || request.reserved[1] ||
         (request.capacity && !request.uids_ptr))
         return -EINVAL;
-
-    required = st_uid_registry_count();
-    request.count = required;
-    ret = -ENOSPC;
-    if (request.capacity < required)
-        goto reply;
-    if (required) {
-        items = kcalloc(required, sizeof(*items), GFP_KERNEL);
-        if (!items)
-            return -ENOMEM;
-    }
-    ret = st_uid_registry_snapshot(items, required, &actual);
-    if (ret && ret != -ENOSPC)
-        goto out;
-    request.count = actual;
-    if (!ret && actual &&
-        copy_to_user(u64_to_user_ptr(request.uids_ptr), items,
-                     (size_t)actual * sizeof(*items))) {
-        ret = -EFAULT;
-        goto out;
-    }
-reply:
-    if (copy_to_user((void __user *)argument, &request, sizeof(request)))
-        ret = -EFAULT;
-out:
-    kfree(items);
-    return ret;
+    return st_ioctl_list_reply(argument, &request, sizeof(request), request.capacity,
+        &request.count, request.uids_ptr, ST_LIST_UID);
 }
 
 static long st_ioctl_program_list(unsigned long argument)
 {
     struct st_program_list_request request;
-    struct st_program_name *items = NULL;
-    __u32 required, actual = 0;
-    int ret;
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
     if (request.reserved[0] || request.reserved[1] ||
         (request.capacity && !request.programs_ptr))
         return -EINVAL;
-
-    required = st_program_registry_count();
-    request.count = required;
-    ret = -ENOSPC;
-    if (request.capacity < required)
-        goto reply;
-    ret = 0;
-    if (!required)
-        goto reply;
-    items = kcalloc(required, sizeof(*items), GFP_KERNEL);
-    if (!items)
-        return -ENOMEM;
-    ret = st_program_registry_snapshot(items, required, &actual);
-    if (ret && ret != -ENOSPC)
-        goto out;
-    request.count = actual;
-    if (!ret && actual &&
-        copy_to_user(u64_to_user_ptr(request.programs_ptr), items,
-                     (size_t)actual * sizeof(*items))) {
-        ret = -EFAULT;
-        goto out;
-    }
-reply:
-    if (copy_to_user((void __user *)argument, &request, sizeof(request)))
-        ret = -EFAULT;
-out:
-    kfree(items);
-    return ret;
+    return st_ioctl_list_reply(argument, &request, sizeof(request), request.capacity,
+        &request.count, request.programs_ptr, ST_LIST_PROGRAM);
 }
 
 static long st_ioctl_syscall_list(unsigned long argument)
 {
     struct st_syscall_list_request request;
-    __u32 *items = NULL, required, actual = 0;
-    int ret;
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
     if (request.reserved[0] || request.reserved[1] ||
         (request.capacity && !request.numbers_ptr))
         return -EINVAL;
-
-    required = st_syscall_registry_count();
-    request.count = required;
-    ret = -ENOSPC;
-    if (request.capacity < required)
-        goto reply;
-    ret = 0;
-    if (!required)
-        goto reply;
-    items = kcalloc(required, sizeof(*items), GFP_KERNEL);
-    if (!items)
-        return -ENOMEM;
-    ret = st_syscall_registry_snapshot(items, required, &actual);
-    if (ret && ret != -ENOSPC)
-        goto out;
-    request.count = actual;
-    if (!ret && actual &&
-        copy_to_user(u64_to_user_ptr(request.numbers_ptr), items,
-                     (size_t)actual * sizeof(*items))) {
-        ret = -EFAULT;
-        goto out;
-    }
-reply:
-    if (copy_to_user((void __user *)argument, &request, sizeof(request)))
-        ret = -EFAULT;
-out:
-    kfree(items);
-    return ret;
+    return st_ioctl_list_reply(argument, &request, sizeof(request), request.capacity,
+        &request.count, request.numbers_ptr, ST_LIST_SYSCALL);
 }
 
 struct st_ioctl_entry {

@@ -32,12 +32,10 @@
 #include "syscall_registry.h"
 #include "uid_registry.h"
 
-/* Tutti i wrapper __x64_sys_* ricevono un puntatore ai registri salvati lungo il percorso di ingresso
- * della system call. */
+/* ABI x86-64: i wrapper ricevono il frame pt_regs della syscall. */
 typedef asmlinkage long (*st_x64_syscall_t)(const struct pt_regs *regs);
 
-/* Descrizione statica delle system call native x86-64. Il contenuto deriva dalla syscall table
- * generata dal kernel contro cui il modulo viene compilato. */
+/* Definizioni dalla syscall table del kernel di compilazione. */
 struct st_syscall_definition {
     unsigned int syscall_nr;
     const char *symbol_name;
@@ -52,8 +50,6 @@ struct st_syscall_definition {
 #undef __SYSCALL_NORETURN
 #endif
 
-/* "__x64_" e la stringa prodotta da #symbol sono string literal adiacenti e vengono concatenate dal
- * compilatore. */
 #define __SYSCALL(number, symbol)                     \
     {                                                 \
         .syscall_nr = (unsigned int)(number),         \
@@ -75,9 +71,6 @@ static const struct st_syscall_definition st_syscall_definitions[] = {
 #undef __SYSCALL_NORETURN
 #undef __SYSCALL
 
-/* Mapping runtime completo, indicizzato direttamente tramite il numero della system call. Ogni slot
- * rappresenta una voce della tabella x86-64 generata dal kernel e conserva il simbolo, l'indirizzo
- * risolto e l'eventuale proprietÃ  nonreturning. */
 struct st_hook_target {
     const char *symbol_name;
     unsigned long original_ip;
@@ -85,8 +78,7 @@ struct st_hook_target {
     bool explicit_entry;
 };
 
-/* PiÃ¹ numeri di system call possono condividere lo stesso indirizzo Ftrace. I filtri verranno quindi
- * conservati separatamente e deduplicati per original_ip. */
+/* Filtri separati dai target: piu syscall possono condividere un indirizzo. */
 struct st_hook_filter {
     unsigned long original_ip;
     bool installed;
@@ -98,8 +90,7 @@ static struct st_hook_filter st_hook_filters[NR_syscalls];
 
 static size_t st_hook_filter_count;
 
-/* Prepara tutti gli slot della tabella. Inizialmente ogni numero viene associato alla fallback
- * sys_ni_syscall. Le definizioni esplicite generate dal kernel sovrascrivono poi i rispettivi slot. */
+/* Gli slot impliciti restano associati a sys_ni_syscall. */
 static int st_hook_targets_prepare(void)
 {
     const struct st_syscall_definition *definition;
@@ -140,8 +131,6 @@ static int st_hook_targets_prepare(void)
     return 0;
 }
 
-/* Risolve un singolo simbolo kernel tramite una Kprobe temporanea. La Kprobe non installa handler e
- * viene rimossa subito dopo avere acquisito l'indirizzo. */
 static int st_resolve_symbol(const char *symbol_name, unsigned long *original_ip)
 {
     struct kprobe probe = {
@@ -168,16 +157,13 @@ static int st_resolve_symbol(const char *symbol_name, unsigned long *original_ip
     return 0;
 }
 
-/* Risolve tutti i target completi. Se due numeri di syscall usano lo stesso nome di simbolo,
- * l'indirizzo viene risolto una sola volta e copiato nelle entry successive. Questo evita soprattutto
- * centinaia di Kprobe ripetute su __x64_sys_ni_syscall. */
+/* Riusa i simboli gia risolti, inclusa la fallback sys_ni_syscall. */
 static int st_resolve_all_targets(void)
 {
     struct st_hook_target *target;
     const struct st_hook_target *previous;
     size_t syscall_nr;
     size_t previous_nr;
-    bool reused;
     int ret;
 
     for (syscall_nr = 0; syscall_nr < ARRAY_SIZE(st_hook_targets); syscall_nr++) {
@@ -189,7 +175,6 @@ static int st_resolve_all_targets(void)
         }
 
         target->original_ip = 0U;
-        reused = false;
 
         for (previous_nr = 0; previous_nr < syscall_nr; previous_nr++) {
             previous = &st_hook_targets[previous_nr];
@@ -204,11 +189,10 @@ static int st_resolve_all_targets(void)
             }
 
             target->original_ip = previous->original_ip;
-            reused = true;
             break;
         }
 
-        if (reused)
+        if (previous_nr < syscall_nr)
             continue;
         ret = st_resolve_symbol(target->symbol_name, &target->original_ip);
         if (ret != 0) {
@@ -221,16 +205,13 @@ static int st_resolve_all_targets(void)
     return 0;
 }
 
-/* Costruisce l'insieme degli indirizzi Ftrace distinti. Due simboli diversi possono condividere lo
- * stesso indirizzo, come avviene con alcuni alias interni del kernel. La deduplicazione deve quindi
- * essere effettuata su original_ip e non soltanto sul nome del simbolo. */
+/* Deduplica per indirizzo: anche simboli diversi possono essere alias. */
 static int st_hook_filters_build(void)
 {
     const struct st_hook_target *target;
     struct st_hook_filter *filter;
     size_t syscall_nr;
     size_t filter_index;
-    bool already_present;
 
     memset(st_hook_filters, 0, sizeof(st_hook_filters));
     st_hook_filter_count = 0U;
@@ -244,18 +225,11 @@ static int st_hook_filters_build(void)
             return -EINVAL;
         }
 
-        already_present = false;
-
         for (filter_index = 0; filter_index < st_hook_filter_count; filter_index++) {
-            filter = &st_hook_filters[filter_index];
-
-            if (filter->original_ip != target->original_ip)
-                continue;
-            already_present = true;
-            break;
+            if (st_hook_filters[filter_index].original_ip == target->original_ip)
+                break;
         }
-
-        if (already_present)
+        if (filter_index < st_hook_filter_count)
             continue;
 
         if (st_hook_filter_count >= ARRAY_SIZE(st_hook_filters)) {
@@ -263,7 +237,7 @@ static int st_hook_filters_build(void)
             return -ENOSPC;
         }
 
-        filter = &st_hook_filters[ st_hook_filter_count];
+        filter = &st_hook_filters[st_hook_filter_count];
         filter->original_ip = target->original_ip;
         filter->installed = false;
 
@@ -278,8 +252,6 @@ static int st_hook_filters_build(void)
     return 0;
 }
 
-/* Azzera esclusivamente lo stato runtime. La preparazione successiva ricostruirÃ  nomi e proprietÃ
- * dalla syscall table generata. */
 static void st_hook_runtime_clear(void)
 {
     memset(st_hook_targets, 0, sizeof(st_hook_targets));
@@ -291,9 +263,7 @@ static void st_hook_runtime_clear(void)
 static atomic_t st_hook_active_calls = ATOMIC_INIT(0);
 static DECLARE_WAIT_QUEUE_HEAD(st_hook_active_wait_queue);
 
-/* Per exit ed exit_group la funzione originale non restituisce il controllo al wrapper. Il record vive
- * sul kernel stack del wrapper. Il tracepoint sched_process_exit viene eseguito dallo stesso task
- * prima che tale stack venga distrutto. */
+/* Record sullo stack del wrapper; sched_process_exit lo rimuove prima che lo stack scompaia. */
 struct st_nonreturning_call {
     struct list_head link;
     struct task_struct *task;
@@ -312,8 +282,6 @@ static atomic64_t st_nonreturning_completed = ATOMIC64_INIT(0);
 
 static atomic64_t st_nonreturning_unexpected_returns = ATOMIC64_INIT(0);
 
-/* Forward declaration: st_call_original_syscall() Ã¨ definita prima degli helper che gestiscono il
- * record nonreturning. */
 static void notrace st_nonreturning_call_track(struct st_nonreturning_call *call);
 
 static bool notrace st_nonreturning_call_cancel(struct st_nonreturning_call *call);
@@ -324,11 +292,7 @@ static bool st_hook_installed;
 static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *regs,
     unsigned long original_ip);
 
-/* Il callback Ftrace viene eseguito in un contesto nel quale non Ã¨ consentito dormire. Esegue quindi
- * soltanto controlli lockless e non bloccanti: - evita la ricorsione quando il wrapper richiama
- * l'originale; - esce immediatamente quando il monitor Ã¨ disattivato; - valida il percorso syscall
- * nativo x86-64; - scarta le chiamate non registrate; - trasporta l'indirizzo originale nel secondo
- * argomento; - devia l'instruction pointer verso il wrapper generico. */
+/* Contesto Ftrace: solo controlli non bloccanti, senza attese. */
 static void notrace st_ftrace_callback(unsigned long ip, unsigned long parent_ip, struct ftrace_ops *ops,
     struct ftrace_regs *fregs)
 {
@@ -341,68 +305,48 @@ static void notrace st_ftrace_callback(unsigned long ip, unsigned long parent_ip
 
     (void)ops;
 
-    /* Quando il wrapper richiama la funzione originale, parent_ip appartiene al modulo. In quel caso
-     * Ftrace deve lasciare proseguire la vera funzione __x64_sys_*. */
+    /* Evita la ricorsione quando il modulo richiama la syscall originale. */
     if (within_module(parent_ip, THIS_MODULE))
         return;
 
-    /* Il monitor disattivato Ã¨ il caso piÃ¹ economico: la static key permette di uscire prima di
-     * recuperare e validare il frame pt_regs della system call. */
     if (!st_monitor_fast_path_enabled())
         return;
 
-    /* Durante il teardown il callback puÃ² essere ancora osservato da una CPU giÃ  entrata nel percorso
-     * Ftrace. */
+    /* Il teardown puo sovrapporsi a callback gia iniziate. */
     if (!READ_ONCE(st_hook_accepting_calls))
         return;
 
-    /* FTRACE_OPS_FL_SAVE_REGS garantisce un frame pt_regs completo per questa configurazione x86-64. */
     kernel_regs = ftrace_get_regs(fregs);
     if (unlikely(kernel_regs == NULL))
         return;
 
-    /* Per un vero wrapper __x64_sys_* il primo argomento C deve essere esattamente il frame pt_regs
-     * della syscall corrente. Questo controllo Ã¨ particolarmente importante quando il punto Ftrace Ã¨
-     * pubblicato con un alias __do_sys_*: la medesima funzione potrebbe essere raggiunta anche da un
-     * chiamante interno al kernel con una firma differente. */
+    /* Esclude chiamanti kernel con firma diversa, anche in presenza di alias __do_sys_*. */
     first_argument = ftrace_regs_get_argument(fregs, 0);
     syscall_regs = (struct pt_regs *)first_argument;
 
     if (unlikely(syscall_regs != current_pt_regs()))
         return;
 
-    /* Accettiamo soltanto il percorso syscall nativo x86-64. user_64bit_mode() esclude IA32, mentre
-     * in_32bit_syscall() esclude sia IA32 sia x32. */
+    /* Solo syscall native x86-64: esclude IA32 e x32. */
     if (unlikely(!user_mode(syscall_regs) || !user_64bit_mode(syscall_regs) || in_32bit_syscall()))
         return;
 
-    /* Il callback deve evitare di creare wrapper inutili. Il registro delle syscall espone una lettura
-     * lockless e non bloccante, quindi puÃ² essere consultato prima del redirect Ftrace. */
     raw_syscall_nr = READ_ONCE(syscall_regs->orig_ax);
     syscall_nr = (unsigned int)raw_syscall_nr;
 
-    /* Escludiamo numeri negativi, valori non rappresentabili esattamente e numeri esterni alla tabella
-     * x86-64. */
     if (unlikely(raw_syscall_nr != (unsigned long)syscall_nr || syscall_nr >= ARRAY_SIZE(st_hook_targets)))
         return;
 
-    /* Con una syscall non registrata non serve eseguire classificazione, identity matching o rate
-     * limiting. */
     if (!st_syscall_registry_contains(syscall_nr))
         return;
 
-    /* Ricaviamo l'inizio canonico della funzione intercettata. Il valore ip ricevuto dal callback puÃ²
-     * rappresentare il punto di instrumentazione Ftrace. */
+    /* Usa l'inizio canonico della funzione, non il punto di strumentazione. */
     original_ip = ftrace_get_symaddr(ip);
 
-    /* La funzione __x64_sys_* originale riceve il proprio primo argomento in %rdi. Quel valore
-     * contiene il puntatore ai pt_regs della system call e non viene modificato. Inseriamo invece
-     * original_ip in %rsi, che diventerÃ  il secondo argomento del wrapper generico dopo il redirect.
-     * Questa operazione Ã¨ specifica per l'ABI kernel x86-64. */
+    /* Conserva pt_regs in %rdi; passa original_ip al wrapper in %rsi (ABI x86-64). */
     kernel_regs->si = original_ip;
 
-    /* Il conteggio viene incrementato prima della deviazione. Il wrapper lo decrementerÃ  su ogni
-     * percorso di uscita. */
+    /* Acquisisce active_calls prima del redirect. */
     atomic_inc(&st_hook_active_calls);
 
     ftrace_regs_set_instruction_pointer(fregs, (unsigned long)st_generic_syscall_wrapper);
@@ -413,9 +357,7 @@ static struct ftrace_ops st_syscall_ftrace_ops = {
     .flags = FTRACE_OPS_FL_SAVE_REGS | FTRACE_OPS_FL_RECURSION | FTRACE_OPS_FL_IPMODIFY,
 };
 
-/* Verifica la corrispondenza completa: numero x86-64 -> simbolo intercettato. Durante il normale
- * funzionamento la tabella Ã¨ immutabile. Nel teardown gli indirizzi vengono azzerati soltanto dopo che
- * active_calls Ã¨ tornato a zero. */
+/* La tabella resta immutabile fino all'azzeramento di active_calls. */
 
 static const struct st_hook_target * st_hook_target_find(unsigned int syscall_nr,
     unsigned long original_ip)
@@ -434,17 +376,13 @@ static const struct st_hook_target * st_hook_target_find(unsigned int syscall_nr
     return target;
 }
 
-/* Invoca il vero wrapper x86-64. Per exit ed exit_group viene prima pubblicato un record locale nella
- * lista osservata da sched_process_exit. */
 static asmlinkage long notrace st_call_original_syscall(const struct st_hook_target *target,
     st_x64_syscall_t original_syscall, const struct pt_regs *regs, bool *release_active_call)
 {
     struct st_nonreturning_call call;
     long result;
 
-    /* O_TRUNC richiede lo scaricamento forzato e potrebbe ignorare il riferimento a THIS_MODULE. Il
-     * controllo e' comune al percorso rilevante e a quello che non richiede throttling. Per le
-     * chiamate rilevanti avviene dopo l'ammissione. */
+    /* O_TRUNC puo ignorare il pin del modulo: negalo anche senza matching, dopo l'eventuale ammissione. */
     if ((unsigned long)regs->orig_ax == (unsigned long)__NR_delete_module &&
         ((unsigned int)regs->si & O_TRUNC))
         return -EPERM;
@@ -455,13 +393,9 @@ static asmlinkage long notrace st_call_original_syscall(const struct st_hook_tar
     st_nonreturning_call_track(&call);
     result = original_syscall(regs);
 
-    /* Il kernel ha marcato queste entry tramite __SYSCALL_NORETURN. Questo ramo non dovrebbe quindi
-     * essere mai raggiunto. */
     atomic64_inc(&st_nonreturning_unexpected_returns);
 
-    /* Normalmente il record Ã¨ ancora nella lista e il normale percorso out del wrapper rilascerÃ
-     * active_calls. Se il tracepoint lo avesse giÃ  rimosso, active_calls sarebbe giÃ  stato rilasciato
-     * dalla callback. */
+    /* Se il tracepoint ha gia rimosso il record, ha anche rilasciato active_calls. */
     if (!st_nonreturning_call_cancel(&call))
         *release_active_call = false;
 
@@ -469,9 +403,7 @@ static asmlinkage long notrace st_call_original_syscall(const struct st_hook_tar
     return result;
 }
 
-/* Classifica una system call secondo la politica del monitor: monitor attivo AND numero di syscall
- * registrato AND (effective UID registrato OR programma registrato). La funzione viene eseguita nel
- * wrapper, quindi in process context e non nel callback Ftrace. */
+/* Policy: monitor ON && syscall registrata && (EUID registrato || programma registrato). */
 static bool st_syscall_is_relevant(unsigned int syscall_nr, char *program_name,
     size_t program_name_capacity, bool *program_name_valid)
 {
@@ -484,26 +416,20 @@ static bool st_syscall_is_relevant(unsigned int syscall_nr, char *program_name,
         program_name[0] = '\0';
     }
 
-    if (!st_monitor_fast_path_enabled()) {
+    if (!st_monitor_fast_path_enabled())
         return false;
-    }
 
-    if (!st_syscall_registry_contains(syscall_nr)) {
+    if (!st_syscall_registry_contains(syscall_nr))
         return false;
-    }
 
-    /* Quando l'UID Ã¨ registrato non serve identificare subito l'eseguibile. Il basename sarÃ  acquisito
-     * soltanto se la chiamata subirÃ  effettivamente un THROTTLE. */
-    if (st_uid_registry_contains(current_euid())) {
+    /* Matching UID: acquisisci il nome solo al primo THROTTLE. */
+    if (st_uid_registry_contains(current_euid()))
         return true;
-    }
 
-    if (program_name == NULL || program_name_capacity == 0U) {
+    if (program_name == NULL || program_name_capacity == 0U)
         return false;
-    }
 
-    /* Nel percorso basato sul programma conserviamo il basename giÃ  usato per il matching, evitando di
-     * ricavarlo nuovamente al primo THROTTLE. */
+    /* Conserva il nome usato per il matching anche per le statistiche. */
     identity_ret = st_program_get_current_name(program_name, program_name_capacity);
 
     if (identity_ret == 0 && st_program_registry_contains(program_name)) {
@@ -515,28 +441,20 @@ static bool st_syscall_is_relevant(unsigned int syscall_nr, char *program_name,
     return false;
 }
 
-/* Rivaluta la policy dopo le modifiche ai registri e i risvegli. */
+/* Rivaluta a ogni iterazione senza sovrascrivere il nome della prima classificazione. */
 static bool st_syscall_policy_still_matches(unsigned int syscall_nr)
 {
     char name[ST_PROGRAM_NAME_CAPACITY];
 
-    if (!st_monitor_fast_path_enabled() || !st_syscall_registry_contains(syscall_nr))
-        return false;
-    if (st_uid_registry_contains(current_euid()))
-        return true;
-    return st_program_get_current_name(name, sizeof(name)) == 0 && st_program_registry_contains(name);
+    return st_syscall_is_relevant(syscall_nr, name, sizeof(name), NULL);
 }
 
-/* Rilascia una reference acquisita dal callback Ftrace. Deve essere chiamata su ogni percorso di
- * uscita dal wrapper, compreso quello interrotto da un segnale. */
 static void notrace st_hook_active_call_put(void)
 {
     if (atomic_dec_and_test(&st_hook_active_calls))
         wake_up_all(&st_hook_active_wait_queue);
 }
 
-/* Inserisce un record sullo stack del wrapper nella lista dei task che stanno per eseguire una syscall
- * non ritornante. */
 static void notrace st_nonreturning_call_track(struct st_nonreturning_call *call)
 {
     unsigned long flags;
@@ -552,8 +470,7 @@ static void notrace st_nonreturning_call_track(struct st_nonreturning_call *call
     atomic64_inc(&st_nonreturning_started);
 }
 
-/* Percorso difensivo utilizzato soltanto se una funzione marcata nonreturning restituisce
- * inaspettatamente il controllo. Restituisce true se il record era ancora posseduto dal wrapper. */
+/* Ritorno inatteso: true solo se il wrapper possiede ancora il record. */
 static bool notrace st_nonreturning_call_cancel(struct st_nonreturning_call *call)
 {
     unsigned long flags;
@@ -572,9 +489,7 @@ static bool notrace st_nonreturning_call_cancel(struct st_nonreturning_call *cal
     return removed;
 }
 
-/* Callback del tracepoint: sched_process_exit(task, group_dead) La callback cerca un record
- * appartenente al task in uscita. Quando lo trova, il wrapper non potrÃ  piÃ¹ riprendere l'esecuzione:
- * active_calls puÃ² quindi essere rilasciato. */
+/* Il task in uscita non tornera al wrapper: il tracepoint rilascia active_calls. */
 static void notrace st_sched_process_exit_callback(void *ignore, struct task_struct *task,
     bool group_dead)
 {
@@ -589,8 +504,7 @@ static void notrace st_sched_process_exit_callback(void *ignore, struct task_str
 
     spin_lock_irqsave(&st_nonreturning_calls_lock, flags);
 
-    list_for_each_entry_safe(call, next, &st_nonreturning_calls, link)
-{
+    list_for_each_entry_safe(call, next, &st_nonreturning_calls, link) {
         if (call->task != task)
             continue;
 
@@ -608,8 +522,6 @@ static void notrace st_sched_process_exit_callback(void *ignore, struct task_str
     st_hook_active_call_put();
 }
 
-/* Individua sched_process_exit senza richiedere un riferimento diretto al simbolo
- * __tracepoint_sched_process_exit. */
 static void st_find_sched_process_exit_tracepoint(struct tracepoint *tracepoint, void *private_data)
 {
     struct tracepoint **result;
@@ -665,8 +577,7 @@ static void st_nonreturning_tracepoint_exit(void)
         pr_err("syscall_throttle: rimozione tracepoint " "sched_process_exit fallita: errore=%d\n", ret);
     }
 
-    /* Garantisce che nessuna callback del modulo sia ancora in esecuzione prima del completamento di
-     * module_exit. */
+    /* Attende anche le callback gia in esecuzione prima di module_exit. */
     tracepoint_synchronize_unregister();
     st_sched_process_exit_registered = false;
     st_sched_process_exit_tracepoint = NULL;
@@ -700,10 +611,7 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
     int identity_ret;
     int wait_ret;
 
-    /* Il contesto statistico viene inizializzato in modo lazy. FinchÃ© la syscall non riceve il primo
-     * THROTTLE serve soltanto sapere che nessun blocco Ã¨ stato contabilizzato.
-     * st_statistics_block_begin() inizializzerÃ  completamente la struttura quando il contesto
-     * diventerÃ  necessario. */
+    /* block_begin inizializzera gli altri campi al primo THROTTLE. */
     statistics_context.counted = false;
     statistics_program_name[0] = '\0';
     statistics_program_name_valid = false;
@@ -724,8 +632,7 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
         goto out;
     }
 
-    /* Protegge ogni delete_module entrata nel wrapper, anche quando l'identita' non corrisponde alla
-     * policy. active_calls protegge gia' questo ingresso se un teardown concorrente e' iniziato. */
+    /* Pin per ogni delete_module, anche fuori policy; active_calls protegge l'ingresso. */
     if (syscall_nr == (unsigned int)__NR_delete_module) {
         if (!try_module_get(THIS_MODULE)) {
             result = -EBUSY;
@@ -736,23 +643,18 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
 
     original_syscall = (st_x64_syscall_t)original_ip;
 
-    /* Process context: prima di policy, budget e statistiche. L'helper esegue la richiesta sul file
-     * verificato, senza bypassare LSM o i controlli dei privilegi nel driver. */
+    /* Controllo sul file verificato, prima di policy/budget; conserva LSM e permessi del driver. */
     if (syscall_nr == (unsigned int)__NR_ioctl && st_device_try_control_ioctl((unsigned int)regs->di,
         (unsigned int)regs->si, (unsigned long)regs->dx, &result)) {
         goto out;
     }
 
-    /* La classificazione puÃ² restituire anche il basename giÃ  usato per il matching sul registro dei
-     * programmi. */
     if (!st_syscall_is_relevant(syscall_nr, statistics_program_name, sizeof(statistics_program_name),
         &statistics_program_name_valid)) {
-        result = st_call_original_syscall(target, original_syscall, regs, &release_active_call);
-        goto out;
+        goto call_original;
     }
 
-    /* La chiamata rilevante viene contata una sola volta, indipendentemente dai retry del rate
-     * limiter. */
+    /* Conta una sola invocazione, anche in presenza di retry. */
     statistics_generation = st_statistics_record_relevant_invocation();
 
     for (;;) {
@@ -772,27 +674,22 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
         case ST_RATE_LIMITER_ALLOW:
         case ST_RATE_LIMITER_BYPASS:
         case ST_RATE_LIMITER_SHUTDOWN:
-            /* Se esiste un contesto bloccato, la misura termina immediatamente prima della syscall
-             * originale. Una chiamata mai entrata in THROTTLE non possiede invece alcun contesto
-             * statistico da completare. */
+            /* Conclude la misura e rilascia il token prima della syscall originale. */
             if (statistics_context.counted) {
                 st_statistics_block_complete(&statistics_context);
             }
 
             st_statistics_relevant_release(&statistics_generation);
-            result = st_call_original_syscall(target, original_syscall, regs, &release_active_call);
-            goto out;
+            goto call_original;
 
         case ST_RATE_LIMITER_THROTTLE:
-            /* Una stessa invocazione puÃ² osservare piÃ¹ decisioni THROTTLE, ma deve aprire un solo
-             * contesto statistico. */
+
             if (!first_throttle_seen) {
                 kuid_t blocked_euid;
 
                 first_throttle_seen = true;
                 blocked_euid = current_euid();
 
-                /* Nel percorso di rilevanza basato sull'UID il basename non Ã¨ stato ancora acquisito. */
                 if (!statistics_program_name_valid) {
                     identity_ret = st_program_get_current_name(statistics_program_name,
                         sizeof(statistics_program_name));
@@ -800,8 +697,7 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
                     if (identity_ret == 0) {
                         statistics_program_name_valid = true;
                     } else {
-                        /* Un fallimento nella sola raccolta statistica non deve alterare throttling o
-                         * risultato della syscall. */
+                        /* Un errore nella raccolta del nome non altera il throttling. */
                         strscpy(statistics_program_name, "<unavailable>", sizeof(statistics_program_name));
                     }
                 }
@@ -814,8 +710,7 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
             wait_ret = st_rate_limiter_wait_for_change(observed_generation);
 
             if (wait_ret != 0) {
-                /* La syscall originale non verrÃ  eseguita. L'attesa viene registrata come interrotta e
-                 * non contribuisce al peak delay. */
+                /* Interruzione: niente syscall originale e nessun contributo al peak. */
                 if (statistics_context.counted) {
                     st_statistics_block_interrupted(&statistics_context);
                 }
@@ -824,12 +719,13 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
                 goto out;
             }
 
-            /* Il wake-up non assegna automaticamente il budget: la richiesta compete nuovamente
-             * tramite acquire. */
+            /* Il risveglio richiede una nuova acquisizione del budget. */
             break;
         }
     }
 
+call_original:
+    result = st_call_original_syscall(target, original_syscall, regs, &release_active_call);
 out:
     st_statistics_relevant_release(&statistics_generation);
     WARN_ON_ONCE(statistics_context.counted);
@@ -843,7 +739,6 @@ out:
     return result;
 }
 
-/* Usata dal rollback dell'inizializzazione e dallo scaricamento. */
 static size_t st_hook_filters_remove(const char *phase)
 {
     size_t index;
@@ -904,8 +799,6 @@ int st_syscall_hook_init(void)
     if (ret != 0)
         goto fail_tracepoint;
 
-    /* Ogni indirizzo Ftrace viene installato una sola volta, anche quando piÃ¹ numeri di syscall
-     * condividono la stessa funzione kernel. */
     for (filter_index = 0; filter_index < st_hook_filter_count; filter_index++) {
         filter = &st_hook_filters[filter_index];
         ret = ftrace_set_filter_ip(&st_syscall_ftrace_ops, filter->original_ip, 0, 0);
@@ -962,8 +855,6 @@ void st_syscall_hook_exit(void)
     if (!READ_ONCE(st_hook_installed))
         return;
 
-    /* Le callback giÃ  iniziate possono completare il redirect, ma nessuna nuova callback puÃ² entrare
-     * nel wrapper. */
     WRITE_ONCE(st_hook_accepting_calls, false);
     unregister_ret = unregister_ftrace_function(&st_syscall_ftrace_ops);
     if (unregister_ret != 0) {
@@ -972,8 +863,7 @@ void st_syscall_hook_exit(void)
 
     removed_filter_count = st_hook_filters_remove("rimozione");
 
-    /* Il tracepoint sched_process_exit deve rimanere attivo durante questa attesa per completare exit
-     * ed exit_group. */
+    /* Mantiene il tracepoint attivo finche exit/exit_group non hanno rilasciato i riferimenti. */
     wait_event(st_hook_active_wait_queue, atomic_read(&st_hook_active_calls) == 0);
 
     st_nonreturning_tracepoint_exit();
