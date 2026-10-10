@@ -58,7 +58,7 @@ Se rimangono N waiter contabilizzati, la nuova osservazione parte con:
 
 - N invocazioni rilevanti e N bloccate;
 - N thread attualmente bloccati e picco iniziale N;
-- zero completamenti, interruzioni, tempo integrato e somma dei ritardi;
+- zero completamenti, interruzioni, tempo integrato;
 - peak delay non disponibile fino a un completamento.
 
 Le attese trasferite misurano soltanto il tempo successivo all'inizio della
@@ -74,14 +74,14 @@ Non comprende il tempo trascorso dentro la syscall, per esempio una read
 sospesa su una pipe vuota.
 
 Le attese interrotte contribuiscono al numero delle interruzioni e al tempo
-di blocco, ma non al peak o alla media dei ritardi delle attese completate.
+di blocco, ma non al peak delay delle attese completate.
 I campioni del peak provengono dalle attese concluse, non da quelle pendenti.
 
 La media temporale dei thread bloccati è:
 
 `integrale del numero di thread bloccati / durata dell'osservazione`.
 
-È distinta dalla media dei ritardi individuali. Il peak riporta anche
+La media dei ritardi individuali non viene esposta. Il peak riporta anche
 numero di syscall, programma ed EUID associati.
 
 DISABLE attende la contabilizzazione dei waiter rilasciati, senza attendere
@@ -256,3 +256,18 @@ invocazioni resta necessaria per i cambi di sessione.
 La suite corrente comprende 20 regressioni, senza statistics_reset_regression.py,
 oltre a policy_transition_stress. Aggiornare eventuali elenchi di esecuzione
 locali rimuovendo solo il test del reset manuale. Ricompilare modulo, CLI e test.
+
+
+## Rimozione del ritardo medio — 10 ottobre 2026
+
+La CLI non espone piu il ritardo medio delle chiamate bloccate e lo snapshot
+non contiene piu `total_delay_ns`. Restano il contatore delle attese completate,
+il peak delay con la relativa identita e syscall, la media temporale e il picco
+del numero di thread bloccati. La misura del singolo ritardo resta necessaria
+per aggiornare il peak.
+
+Su x86-64 lo snapshot passa da 344 a 336 byte: cambia ST_IOCTL_STATS_GET.
+Gli altri 18 comandi ioctl restano invariati. Scaricare il vecchio modulo
+prima della sostituzione; ricompilare modulo, CLI e test insieme.
+Le 20 regressioni esistenti e lo stress test restano applicabili senza modifiche:
+non dipendono dalla riga di output rimossa.

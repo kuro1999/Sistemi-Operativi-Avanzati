@@ -175,7 +175,6 @@ static int execute_statistics_get(int fd)
 {
     struct st_statistics_snapshot snapshot = {0};
     double average_blocked;
-    double average_delay_ms;
 
     if (ioctl(fd, ST_IOCTL_STATS_GET, &snapshot) == -1)
         return ioctl_failed("ST_IOCTL_STATS_GET");
@@ -198,8 +197,6 @@ static int execute_statistics_get(int fd)
 
     average_blocked = snapshot.observation_ns == 0U ? 0.0 :
         (double)snapshot.blocked_thread_time_ns / (double)snapshot.observation_ns;
-    average_delay_ms = snapshot.completed_blocked_invocations == 0U ? 0.0 :
-        ((double)snapshot.total_delay_ns / (double)snapshot.completed_blocked_invocations) / 1000000.0;
 
     printf("Sessione statistiche: %s\n", snapshot.session_active != 0U ? "attiva" : "inattiva");
     printf("Durata osservazione: %.6f secondi\n", (double)snapshot.observation_ns / 1000000000.0);
@@ -212,11 +209,6 @@ static int execute_statistics_get(int fd)
     printf("Thread attualmente bloccati: %u\n", snapshot.current_blocked);
     printf("Picco thread bloccati: %u\n", snapshot.peak_blocked);
     printf("Media temporale thread bloccati: %.6f\n", average_blocked);
-
-    if (snapshot.completed_blocked_invocations == 0U)
-        printf("Ritardo medio delle chiamate bloccate: non disponibile\n");
-    else
-        printf("Ritardo medio delle chiamate bloccate: %.6f ms\n", average_delay_ms);
 
     if (snapshot.peak_valid == 0U) {
         printf("Peak delay: non disponibile\n");

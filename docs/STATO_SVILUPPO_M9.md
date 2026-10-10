@@ -1,3 +1,7 @@
+> **Aggiornamento (10 ottobre 2026):** il ritardo medio delle chiamate bloccate
+> e il campo `total_delay_ns` sono stati rimossi. Gli esempi di questa metrica
+> e del precedente layout dello snapshot restano soltanto storici.
+
 > **Nota storica (10 ottobre 2026):** il reset manuale delle statistiche
 > e la sua contabilità delle decisioni pendenti sono stati rimossi. I riferimenti
 > al reset in questo documento descrivono la precedente implementazione.

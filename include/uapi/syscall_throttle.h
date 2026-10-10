@@ -153,7 +153,6 @@ struct st_statistics_snapshot {
     __aligned_u64 completed_blocked_invocations;
     __aligned_u64 interrupted_blocked_invocations;
 
-    __aligned_u64 total_delay_ns;
     __aligned_u64 peak_delay_ns;
 
     __u32 current_blocked;

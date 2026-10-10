@@ -31,7 +31,6 @@ struct st_statistics_state {
     u64 completed_blocked_invocations;
     u64 interrupted_blocked_invocations;
 
-    u64 total_delay_ns;
     u64 peak_delay_ns;
 
     u32 current_blocked;
@@ -332,7 +331,6 @@ static void st_statistics_block_finish(struct st_statistics_block_context *conte
     }
     st_statistics.completed_blocked_invocations =
         st_statistics_saturating_increment(st_statistics.completed_blocked_invocations);
-    st_statistics.total_delay_ns = st_statistics_saturating_add(st_statistics.total_delay_ns, delay_ns);
     if (!st_statistics.peak_valid || delay_ns > st_statistics.peak_delay_ns) {
         st_statistics.peak_valid = true;
         st_statistics.peak_delay_ns = delay_ns;
@@ -385,7 +383,6 @@ void st_statistics_get_snapshot(struct st_statistics_snapshot *snapshot)
     snapshot->blocked_invocations = st_statistics.blocked_invocations;
     snapshot->completed_blocked_invocations = st_statistics.completed_blocked_invocations;
     snapshot->interrupted_blocked_invocations = st_statistics.interrupted_blocked_invocations;
-    snapshot->total_delay_ns = st_statistics.total_delay_ns;
     snapshot->peak_delay_ns = st_statistics.peak_delay_ns;
     snapshot->current_blocked = st_statistics.current_blocked;
     snapshot->peak_blocked = st_statistics.peak_blocked;
