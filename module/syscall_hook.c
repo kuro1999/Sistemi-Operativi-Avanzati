@@ -674,12 +674,11 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
         case ST_RATE_LIMITER_ALLOW:
         case ST_RATE_LIMITER_BYPASS:
         case ST_RATE_LIMITER_SHUTDOWN:
-            /* Conclude la misura e rilascia il token prima della syscall originale. */
+            /* Conclude la misura prima della syscall originale. */
             if (statistics_context.counted) {
                 st_statistics_block_complete(&statistics_context);
             }
 
-            st_statistics_relevant_release(&statistics_generation);
             goto call_original;
 
         case ST_RATE_LIMITER_THROTTLE:
@@ -704,7 +703,6 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
 
                 st_statistics_block_begin(&statistics_context, statistics_generation, throttle_start_ns,
                     syscall_nr, blocked_euid, statistics_program_name);
-                st_statistics_relevant_release(&statistics_generation);
             }
 
             wait_ret = st_rate_limiter_wait_for_change(observed_generation);
@@ -727,7 +725,6 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
 call_original:
     result = st_call_original_syscall(target, original_syscall, regs, &release_active_call);
 out:
-    st_statistics_relevant_release(&statistics_generation);
     WARN_ON_ONCE(statistics_context.counted);
 
     /* active_calls resta acquisito durante il rilascio del pin. */

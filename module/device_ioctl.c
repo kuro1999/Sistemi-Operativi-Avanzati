@@ -16,7 +16,7 @@
 #include "syscall_registry.h"
 #include "uid_registry.h"
 
-/* Serializza ENABLE, DISABLE, MAX_SET e RESET. I registri hanno lock propri. */
+/* Serializza ENABLE, DISABLE e MAX_SET. I registri hanno lock propri. */
 static DEFINE_MUTEX(st_policy_lock);
 
 static long st_ioctl_ping(unsigned long argument)
@@ -49,7 +49,7 @@ static long st_ioctl_disable(unsigned long argument)
     mutex_lock(&st_policy_lock);
     if (st_monitor_is_enabled()) {
         /* OFF -> risveglio waiter -> raccolta ritardi e snapshot congelato.
-         * Il mutex impedisce ENABLE/RESET durante timer stop e drain.
+         * Il mutex impedisce ENABLE durante timer stop e drain.
          */
         st_monitor_disable();
         st_rate_limiter_stop();
@@ -100,17 +100,6 @@ static long st_ioctl_stats_get(unsigned long argument)
     st_statistics_get_snapshot(&response);
     return copy_to_user((void __user *)argument, &response, sizeof(response))
         ? -EFAULT : 0;
-}
-
-static long st_ioctl_stats_reset(unsigned long argument)
-{
-    int ret;
-
-    (void)argument;
-    mutex_lock(&st_policy_lock);
-    ret = st_statistics_reset();
-    mutex_unlock(&st_policy_lock);
-    return ret;
 }
 
 static long st_ioctl_uid_update(unsigned long argument, bool add)
@@ -311,7 +300,6 @@ static const struct st_ioctl_entry st_ioctl_commands[] = {
     { ST_IOCTL_MAX_SET,           st_ioctl_max_set,           true,  false },
     { ST_IOCTL_MAX_GET,           st_ioctl_max_get,           false, false },
     { ST_IOCTL_STATS_GET,         st_ioctl_stats_get,         false, false },
-    { ST_IOCTL_STATS_RESET,       st_ioctl_stats_reset,       true,  false },
 };
 
 static const struct st_ioctl_entry *st_ioctl_find(unsigned int command)

@@ -18,8 +18,8 @@ Programma ed EUID sono criteri alternativi: rimuoverne uno non libera il thread
 se l'altro continua a corrispondere. Gli aggiornamenti dei registri notificano
 i waiter, che rivalutano la policy.
 
-Il device ha modo 0666. Le letture sono pubbliche; modifiche, ON/OFF, MAX_SET
-e reset richiedono EUID uguale a GLOBAL_ROOT_UID, nel namespace iniziale.
+Il device ha modo 0666. Le letture sono pubbliche; modifiche, ON/OFF e MAX_SET
+richiedono EUID uguale a GLOBAL_ROOT_UID, nel namespace iniziale.
 Essere root soltanto in un user namespace non soddisfa tale controllo.
 
 ## Budget e finestre
@@ -44,7 +44,6 @@ non si promette MAX in ogni possibile intervallo mobile di un secondo.
 | MAX_SET diverso, ON | Consumo e scadenza conservati | Nuova sessione con waiter trasferiti |
 | MAX_SET da OFF | Configura il prossimo avvio | Snapshot congelato conservato |
 | DISABLE | Ferma limiter e risveglia i waiter | Raccoglie le attese contabilizzate, poi congela |
-| STATS_RESET riuscito | Invariati | Azzera l'osservazione |
 
 Con 3 ammissioni già consumate, aumentare MAX a 5 consente altre 2 ammissioni.
 Ridurre MAX a 2 non revoca le precedenti e impedisce nuove ammissioni finché
@@ -87,7 +86,7 @@ numero di syscall, programma ed EUID associati.
 
 DISABLE attende la contabilizzazione dei waiter rilasciati, senza attendere
 il completamento delle syscall originali. Lo snapshot successivo è stabile.
-STATS_RESET restituisce EPERM ai non-root ed EBUSY con waiter contabilizzati.
+Non e previsto un comando di reset manuale delle statistiche.
 
 ## Accesso amministrativo
 
@@ -151,7 +150,7 @@ prima di rilanciare operazioni di caricamento o scaricamento.
 | Test | Esecuzione e stato iniziale | Stato finale al successo |
 |---|---|---|
 | statistics, max_session, max_same_value, max_change | Utente normale dopo sudo -v; modulo caricato, OFF, registri vuoti | OFF, registri vuoti, MAX=0 |
-| disable, disable_blocking, statistics_reset | Come sopra | OFF, registri vuoti, MAX=0 |
+| disable, disable_blocking | Come sopra | OFF, registri vuoti, MAX=0 |
 | deregistration, registry_concurrency | Come sopra | OFF, registri vuoti, MAX=0 |
 | signal, restart, admitted_signal, blocking_syscall | Come sopra | OFF, registri vuoti, MAX=0 |
 | identity_deregistration | sudo da utente normale; modulo caricato, OFF, registri vuoti | OFF, registri vuoti, MAX=0 |
@@ -174,7 +173,7 @@ sudo env PYTHONDONTWRITEBYTECODE=1 python3 tests/delete_module_edges_regression.
 
 L'autore ha riportato esiti positivi sulla VM, in momenti diversi dello sviluppo,
 per statistiche concorrenti, deregistrazione e selezione OR, ioctl amministrative,
-syscall bloccanti, DISABLE, reset, segnali e SA_RESTART, transizioni concorrenti,
+syscall bloccanti, DISABLE, segnali e SA_RESTART, transizioni concorrenti,
 scaricamento, exit/exit_group e gestione protetta di delete_module.
 
 Questi esiti riguardano casi specifici. Non costituiscono una nuova esecuzione
@@ -229,10 +228,31 @@ Restano le validazioni sui dati effettivi, i privilegi root e l'azzeramento
 necessario delle risposte; budget, sincronizzazione e statistiche non cambiano.
 
 La modifica cambia le dimensioni delle strutture e i valori dei 16 comandi
-ioctl che le trasferiscono. PING, ENABLE, DISABLE e STATS_RESET restano invariati.
+ioctl che le trasferiscono. PING, ENABLE e DISABLE restano invariati; anche il vecchio STATS_RESET
+restava invariato in quella modifica, prima della successiva rimozione.
 I vecchi binari non sono compatibili: scaricare il modulo precedente prima
 di sostituire i file, ricompilare modulo, controller e test, quindi caricare
 il nuovo modulo ed eseguire le regressioni. Non mescolare le due versioni.
 Le macro nell'header UAPI sono la fonte dei numeri ioctl; non usare costanti
 copiate dalla vecchia interfaccia. I documenti di milestone conservano gli
 esempi storici, identificati come tali.
+
+
+## Rimozione del reset manuale — 10 ottobre 2026
+
+Il comando CLI `stats-reset` e la ioctl ST_IOCTL_STATS_RESET sono rimossi.
+Il numero 0x51 non viene riutilizzato. Il dispatcher risponde ENOTTY al vecchio
+comando; non essendo piu riconosciuto, non beneficia del bypass amministrativo
+del limiter. Una sua invocazione puo quindi essere soggetta al throttling
+prima di raggiungere il dispatcher.
+
+Restano le nuove sessioni su ENABLE da OFF e sui cambi effettivi di MAX a
+monitor ON, il congelamento su DISABLE e tutti i campi dello snapshot.
+Le strutture UAPI e i numeri dei 19 comandi rimasti non cambiano.
+La contabilità delle decisioni pendenti, usata soltanto per rifiutare il reset,
+e il relativo rilascio sono eliminati; la generazione statistica delle
+invocazioni resta necessaria per i cambi di sessione.
+
+La suite corrente comprende 20 regressioni, senza statistics_reset_regression.py,
+oltre a policy_transition_stress. Aggiornare eventuali elenchi di esecuzione
+locali rimuovendo solo il test del reset manuale. Ricompilare modulo, CLI e test.

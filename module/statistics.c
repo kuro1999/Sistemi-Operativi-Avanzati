@@ -12,7 +12,7 @@
 #include "statistics.h"
 
 struct st_statistics_state {
-    /* Identifica la sessione dei waiter; cambia a ogni nuova sessione o reset. */
+    /* Identifica la sessione dei waiter; cambia a ogni nuova sessione statistica. */
     u64 generation;
     u64 continuity_generation;
 
@@ -48,8 +48,6 @@ struct st_statistics_state {
  * coincidere anche tra CPU diverse. */
 static DEFINE_SPINLOCK(st_statistics_lock);
 static struct st_statistics_state st_statistics;
-/* Protetto da st_statistics_lock; non viene azzerato dai cambi sessione. */
-static u64 st_statistics_pending_invocations;
 static DECLARE_WAIT_QUEUE_HEAD(st_statistics_drain_queue);
 
 static u64 st_statistics_saturating_add(u64 left, u64 right)
@@ -187,7 +185,7 @@ static bool st_statistics_waiters_drained(void)
 }
 
 /* Il chiamante ha fermato il limiter e risvegliato i waiter; serializza ENABLE
- * e RESET con questa chiusura. Attende le attese contabilizzate, non le syscall
+ * con questa chiusura. Attende le attese contabilizzate, non le syscall
  * originali: block_complete() precede la loro esecuzione. */
 void st_statistics_session_stop(void)
 {
@@ -221,40 +219,6 @@ void st_statistics_session_stop(void)
                 "generazione=%llu, waiter_residui=0\n", (unsigned long long)generation);
 }
 
-int st_statistics_reset(void)
-{
-    unsigned long flags;
-    u64 generation;
-    u64 now_ns;
-    bool session_active;
-    int ret;
-
-    generation = 0U;
-    session_active = false;
-    ret = 0;
-
-    spin_lock_irqsave(&st_statistics_lock, flags);
-    now_ns = ktime_get_ns();
-    /* Non invalidare con RESET i contesti dei waiter o le decisioni pendenti. */
-    if (st_statistics_pending_invocations != 0U || st_statistics.current_blocked != 0U ||
-        (st_statistics.session_active && st_statistics.session_closing)) {
-        ret = -EBUSY;
-        goto out_unlock;
-    }
-    session_active = st_statistics.session_active;
-    st_statistics_reset_session_locked(now_ns, session_active);
-    generation = st_statistics.generation;
-out_unlock:
-    spin_unlock_irqrestore(&st_statistics_lock, flags);
-
-    if (ret == 0) {
-        pr_info("syscall_throttle: statistiche azzerate: "
-                "sessione=%s, generazione=%llu\n", session_active ? "attiva" : "inattiva",
-                (unsigned long long)generation);
-    }
-    return ret;
-}
-
 u64 st_statistics_record_relevant_invocation(void)
 {
     unsigned long flags;
@@ -264,35 +228,14 @@ u64 st_statistics_record_relevant_invocation(void)
 
     spin_lock_irqsave(&st_statistics_lock, flags);
     if (st_statistics.session_active && !st_statistics.session_closing) {
-        /* Contatore e token sotto lo stesso lock: STATS_RESET non puo' separarli. */
+        /* Contatore e generazione appartengono allo stesso snapshot sotto lock. */
         st_statistics.relevant_invocations =
             st_statistics_saturating_increment(st_statistics.relevant_invocations);
-        st_statistics_pending_invocations++;
         generation = st_statistics.generation;
     }
     spin_unlock_irqrestore(&st_statistics_lock, flags);
 
     return generation;
-}
-
-/*
- * Termina la fase relevant -> decisione. Il token appartiene al wrapper.
- * Dopo block_begin il waiter e' gia' protetto da current_blocked;
- * in caso di ammissione chiamare prima della syscall originale.
- * Il contatore sopravvive a MAX_SET e alle transizioni OFF/ON.
- */
-void st_statistics_relevant_release(u64 *generation)
-{
-    unsigned long flags;
-
-    if (generation == NULL || *generation == 0U)
-        return;
-
-    spin_lock_irqsave(&st_statistics_lock, flags);
-    if (!WARN_ON_ONCE(st_statistics_pending_invocations == 0U))
-        st_statistics_pending_invocations--;
-    *generation = 0U;
-    spin_unlock_irqrestore(&st_statistics_lock, flags);
 }
 
 bool st_statistics_block_begin(struct st_statistics_block_context *context,
@@ -317,7 +260,7 @@ bool st_statistics_block_begin(struct st_statistics_block_context *context,
     now_ns = ktime_get_ns();
     if (!st_statistics.session_active || st_statistics.session_closing)
         goto out_unlock;
-    /* ENABLE e RESET invalidano i vecchi token; MAX_SET conserva la continuita'. */
+    /* ENABLE invalida i vecchi token; MAX_SET conserva la continuita'. */
     if (invocation_generation == 0U || invocation_generation < st_statistics.continuity_generation ||
         invocation_generation > st_statistics.generation) {
         goto out_unlock;
@@ -347,7 +290,7 @@ out_unlock:
     return counted;
 }
 
-/* MAX_SET conserva i contesti; ENABLE e RESET delimitano una nuova continuita'.
+/* MAX_SET conserva i contesti; ENABLE delimita una nuova continuita'.
  * I contesti esterni a tale intervallo non modificano i contatori. */
 static void st_statistics_block_finish(struct st_statistics_block_context *context, bool interrupted)
 {
@@ -463,7 +406,6 @@ void st_statistics_exit(void)
     st_statistics_session_stop();
 
     spin_lock_irqsave(&st_statistics_lock, flags);
-    WARN_ON_ONCE(st_statistics_pending_invocations != 0U);
     WARN_ON_ONCE(st_statistics.current_blocked != 0U);
     memset(&st_statistics, 0, sizeof(st_statistics));
     spin_unlock_irqrestore(&st_statistics_lock, flags);

@@ -52,23 +52,9 @@ void st_statistics_max_changed(void);
  * Chiamare dopo l'arresto del limiter e il risveglio dei waiter.
  * Attende la fine delle attese contabilizzate, includendone i ritardi,
  * poi congela lo snapshot. Non attende le syscall originali.
- * Il chiamante deve serializzare ENABLE e RESET con la chiusura.
+ * Il chiamante deve serializzare ENABLE con la chiusura.
  */
 void st_statistics_session_stop(void);
-
-/*
- * Azzera la sessione corrente.
- *
- * Se esistono chiamate contabilizzate come bloccate, il reset
- * viene rifiutato per non invalidare i relativi contesti locali.
- * Il rifiuto copre anche la fase tra record_relevant e la decisione.
- *
- * Restituisce:
- *
- *   0       reset completato;
- *   -EBUSY  esistono thread bloccati o invocazioni in fase di decisione.
- */
-int st_statistics_reset(void);
 
 /*
  * Produce uno snapshot completamente inizializzato.
@@ -86,13 +72,6 @@ void st_statistics_get_snapshot(
  * attiva al momento della registrazione.
  */
 u64 st_statistics_record_relevant_invocation(void);
-
-/*
- * Ogni token non nullo deve essere rilasciato una sola volta:
- * dopo block_begin, oppure prima della syscall originale se ammessa.
- * Azzera il token; richiamarla con token zero non ha effetto.
- */
-void st_statistics_relevant_release(u64 *generation);
 
 /*
  * Registra il primo ingresso in THROTTLE di una invocazione.

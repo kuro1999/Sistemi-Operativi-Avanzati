@@ -253,15 +253,10 @@ struct st_statistics_snapshot {
 #define ST_IOCTL_MAX_GET \
     _IOR(ST_IOCTL_MAGIC, 0x41, struct st_max_config)
 
- // Consultazione e reset delle statistiche.
-/* STATS_GET e pubblico; STATS_RESET richiede EUID root.
- * Il reset restituisce EBUSY anche con decisioni in contabilizzazione,
- * oltre che con waiter presenti o sessione in chiusura.
- */
+/* Consultazione pubblica delle statistiche. */
 #define ST_IOCTL_STATS_GET \
     _IOR(ST_IOCTL_MAGIC, 0x50, struct st_statistics_snapshot)
 
-#define ST_IOCTL_STATS_RESET \
-    _IO(ST_IOCTL_MAGIC, 0x51)
+/* 0x51 non riutilizzato: apparteneva al comando di reset manuale rimosso. */
 
 #endif

@@ -1,3 +1,8 @@
+> **Nota storica (10 ottobre 2026):** il reset manuale delle statistiche
+> e la sua contabilità delle decisioni pendenti sono stati rimossi. I riferimenti
+> al reset in questo documento descrivono la precedente implementazione.
+> Per il comportamento corrente consultare [Comportamento e test](COMPORTAMENTO_E_TEST.md).
+
 > **UAPI aggiornata (10 ottobre 2026):** i campi `reserved` sono stati rimossi.
 > Gli esempi e i controlli relativi a questi campi in questo documento descrivono
 > la vecchia interfaccia. Per quella corrente usare `include/uapi/syscall_throttle.h`

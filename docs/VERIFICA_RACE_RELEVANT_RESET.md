@@ -1,3 +1,8 @@
+> **Nota storica (10 ottobre 2026):** il reset manuale delle statistiche
+> e la sua contabilità delle decisioni pendenti sono stati rimossi. I riferimenti
+> al reset in questo documento descrivono la precedente implementazione.
+> Per il comportamento corrente consultare [Comportamento e test](COMPORTAMENTO_E_TEST.md).
+
 # Correzione della race relevant/reset
 
 Verifica eseguita il 6 ottobre 2026 su Linux x86-64

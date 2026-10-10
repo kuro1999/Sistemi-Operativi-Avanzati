@@ -235,21 +235,6 @@ static int execute_statistics_get(int fd)
     return 0;
 }
 
-static int execute_statistics_reset(int fd)
-{
-    if (ioctl(fd, ST_IOCTL_STATS_RESET) == -1) {
-        if (errno == EPERM)
-            return fail("Reset statistiche non consentito: sono richiesti privilegi root.\n");
-        if (errno == EBUSY)
-            return fail("Reset statistiche non eseguibile: "
-                        "contabilizzazione o attese in corso, oppure sessione in chiusura.\n");
-        return ioctl_failed("ST_IOCTL_STATS_RESET");
-    }
-
-    printf("Statistiche azzerate.\n");
-    return 0;
-}
-
 enum registry { REG_UID, REG_PROGRAM, REG_SYSCALL };
 
 static const struct registry_info {
@@ -444,7 +429,6 @@ static const struct command {
     {"max-set",        "<valore>", OP_MAX_SET, 0,           NULL},
     {"max-get",        NULL,       OP_SIMPLE,  0,           execute_max_get},
     {"stats",          NULL,       OP_SIMPLE,  0,           execute_statistics_get},
-    {"stats-reset",    NULL,       OP_SIMPLE,  0,           execute_statistics_reset},
 };
 
 static void print_usage(const char *program_name)
