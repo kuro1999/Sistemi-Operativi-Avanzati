@@ -36,7 +36,6 @@ Sono già disponibili:
 - protezione dalla rimozione del modulo mentre il device è aperto;
 - una UAPI condivisa tra kernel e user-space;
 - comunicazione tramite `ioctl()`;
-- comando di test `PING`;
 - stato persistente del monitor: attivo oppure disattivato;
 - comandi `ENABLE`, `DISABLE` e `GET_STATUS`;
 - controllo dei privilegi basato sull’effective UID;
@@ -194,7 +193,6 @@ Contiene:
 ### Comandi generali
 
 ```c
-ST_IOCTL_PING
 ST_IOCTL_ENABLE
 ST_IOCTL_DISABLE
 ST_IOCTL_GET_STATUS
@@ -1107,7 +1105,6 @@ ST_IOCTL_PROGRAM_REMOVE
 ### Operazioni pubbliche
 
 ```text
-ST_IOCTL_PING
 ST_IOCTL_GET_STATUS
 ST_IOCTL_UID_GET_COUNT
 ST_IOCTL_UID_LIST
@@ -1126,7 +1123,6 @@ Questo permette di rifiutare subito un chiamante non autorizzato senza accedere 
 ## 20. Comandi disponibili in `stctl`
 
 ```bash
-./stctl ping
 ./stctl status
 ./stctl enable
 ./stctl disable
@@ -1152,7 +1148,6 @@ Il modulo registra:
 - inizializzazione e rilascio dei registri;
 - registrazione e deregistrazione del device;
 - apertura e chiusura;
-- `PING`;
 - lettura e modifica dello stato;
 - tentativi non autorizzati;
 - aggiunta e rimozione di UID;
@@ -1357,36 +1352,6 @@ Programmi registrati: 2
 
 ---
 
-## 24. Test dell’identità corrente
-
-Per verificare `st_program_get_current_name()`, `PING` è stato temporaneamente strumentato.
-
-Eseguendo:
-
-```bash
-./stctl ping
-```
-
-il kernel ha identificato:
-
-```text
-programma 'stctl'
-```
-
-Il test ha confermato il percorso:
-
-```text
-current
-→ mm_struct
-→ exe_file
-→ dentry
-→ basename "stctl"
-```
-
-La strumentazione temporanea è stata successivamente rimossa e `PING` è tornato al comportamento originario.
-
----
-
 ## 25. Test del matching corrente
 
 È stato verificato:
@@ -1585,7 +1550,6 @@ Successivamente:
 
 ```text
 [M1] Character device minimale                     COMPLETATO
-[M2] UAPI e primo ioctl PING                       COMPLETATO
 [M3] Stato ENABLE/DISABLE/GET_STATUS               COMPLETATO
 [M4] Registro UID                                  COMPLETATO
 [M5] Registro nomi degli eseguibili                COMPLETATO

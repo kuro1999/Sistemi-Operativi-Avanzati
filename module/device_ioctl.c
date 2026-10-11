@@ -19,12 +19,6 @@
 /* Serializza ENABLE, DISABLE e MAX_SET. I registri hanno lock propri. */
 static DEFINE_MUTEX(st_policy_lock);
 
-static long st_ioctl_ping(unsigned long argument)
-{
-    (void)argument;
-    return 0;
-}
-
 static long st_ioctl_enable(unsigned long argument)
 {
     int ret = 0;
@@ -281,7 +275,6 @@ struct st_ioctl_entry {
 
 /* Comandi esatti: non basta controllare magic, numero o direzione. */
 static const struct st_ioctl_entry st_ioctl_commands[] = {
-    { ST_IOCTL_PING,              st_ioctl_ping,              false, false },
     { ST_IOCTL_ENABLE,            st_ioctl_enable,            true,  false },
     { ST_IOCTL_DISABLE,           st_ioctl_disable,           true,  false },
     { ST_IOCTL_GET_STATUS,        st_ioctl_get_status,        false, false },

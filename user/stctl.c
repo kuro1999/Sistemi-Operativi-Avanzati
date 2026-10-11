@@ -47,15 +47,6 @@ static int parse_decimal(const char *text, uint64_t limit, uint64_t *out)
     return 0;
 }
 
-static int execute_ping(int fd)
-{
-    if (ioctl(fd, ST_IOCTL_PING) == -1)
-        return ioctl_failed("ST_IOCTL_PING");
-
-    printf("PING completato correttamente.\n");
-    return 0;
-}
-
 static int execute_status(int fd)
 {
     struct st_monitor_status status = {0};
@@ -388,7 +379,6 @@ static const struct command {
     int option;
     int (*execute)(int fd);
 } commands[] = {
-    {"ping",           NULL,       OP_SIMPLE,  0,           execute_ping},
     {"status",         NULL,       OP_SIMPLE,  0,           execute_status},
     {"enable",         NULL,       OP_SIMPLE,  0,           execute_enable},
     {"disable",        NULL,       OP_SIMPLE,  0,           execute_disable},

@@ -133,15 +133,18 @@ static void run_test(void)
     require(control_fd >= 0 && other >= 0 && alias >= 0,
             "apertura descriptor");
 
+    require(call_ioctl(control_fd, _IO(ST_IOCTL_MAGIC, 0x00), NULL) == -1 &&
+            errno == ENOTTY, "comando ritirato ancora riconosciuto");
+
     command(ST_IOCTL_UID_ADD, &root);
     command(ST_IOCTL_UID_ADD, &user);
     command(ST_IOCTL_SYSCALL_ADD, &number);
     set_max(0);
     command(ST_IOCTL_ENABLE, NULL);
 
-    command(ST_IOCTL_PING, NULL);
-    require(call_ioctl(alias, ST_IOCTL_PING, NULL) == 0,
-            "descriptor duplicato");
+    command(ST_IOCTL_GET_STATUS, &status);
+    require(call_ioctl(alias, ST_IOCTL_GET_STATUS, &status) == 0 &&
+            status.enabled == 1, "descriptor duplicato");
     command(ST_IOCTL_GET_STATUS, &status);
     require(status.enabled == 1, "monitor attivo");
     require(call_ioctl(control_fd, ST_IOCTL_MAX_SET, NULL) == -1 &&
@@ -182,8 +185,11 @@ static void run_test(void)
             "sessione isolata non vuota");
     message("FASE ISOLATA: selezione per programma, nessun UID registrato\n");
 
-    probe_blocked(other, ST_IOCTL_PING);
+    probe_blocked(other, ST_IOCTL_GET_STATUS);
     message("PASS: comando noto su altro oggetto sottoposto al limite\n");
+
+    probe_blocked(control_fd, _IO(ST_IOCTL_MAGIC, 0x00));
+    message("PASS: comando ritirato sottoposto al limite e rifiutato\n");
 
     probe_blocked(control_fd, _IO(ST_IOCTL_MAGIC, 0x7f));
     message("PASS: comando sconosciuto sul monitor sottoposto al limite\n");

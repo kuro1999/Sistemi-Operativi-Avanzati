@@ -51,7 +51,7 @@ Sono disponibili:
 - UAPI condivisa tra kernel e user-space;
 - comunicazione tramite `ioctl()`;
 - controller user-space `stctl`;
-- comandi `PING`, `ENABLE`, `DISABLE` e `GET_STATUS`;
+- comandi `ENABLE`, `DISABLE` e `GET_STATUS`;
 - controllo root basato sull’effective UID per le modifiche amministrative;
 - registri completi di UID, programmi e numeri di system call;
 - snapshot consistenti e retry limitati per le liste;
@@ -246,7 +246,6 @@ Contiene:
 ### Comandi generali
 
 ```c
-ST_IOCTL_PING
 ST_IOCTL_ENABLE
 ST_IOCTL_DISABLE
 ST_IOCTL_GET_STATUS
@@ -1281,7 +1280,6 @@ ST_IOCTL_MAX_SET
 ### Operazioni pubbliche
 
 ```text
-ST_IOCTL_PING
 ST_IOCTL_GET_STATUS
 ST_IOCTL_UID_GET_COUNT
 ST_IOCTL_UID_LIST
@@ -1305,7 +1303,6 @@ Le operazioni `ENABLE`, `DISABLE` e `MAX_SET`, oltre al controllo root, acquisis
 ## 20. Comandi disponibili in `stctl`
 
 ```bash
-./stctl ping
 ./stctl status
 ./stctl enable
 ./stctl disable
@@ -1602,36 +1599,6 @@ Programmi registrati: 2
   curl
   python3
 ```
-
----
-
-## 24. Test dell’identità corrente
-
-Per verificare `st_program_get_current_name()`, `PING` è stato temporaneamente strumentato.
-
-Eseguendo:
-
-```bash
-./stctl ping
-```
-
-il kernel ha identificato:
-
-```text
-programma 'stctl'
-```
-
-Il test ha confermato il percorso:
-
-```text
-current
-→ mm_struct
-→ exe_file
-→ dentry
-→ basename "stctl"
-```
-
-La strumentazione temporanea è stata successivamente rimossa e `PING` è tornato al comportamento originario.
 
 ---
 
@@ -2995,119 +2962,6 @@ MAX_GET → 5
 
 ---
 
-## 52. Test della finestra e dell’ammissione
-
-Durante lo sviluppo, `PING` è stato temporaneamente collegato a `st_rate_limiter_try_acquire()` per osservare la logica prima dell’intercettazione reale.
-
-La strumentazione produceva:
-
-```text
-ALLOW    → successo
-THROTTLE → -EAGAIN
-BYPASS   → successo
-```
-
-### Test sequenziale con `MAX = 3`
-
-È stata osservata nella stessa generazione:
-
-```text
-ALLOW
-ALLOW
-ALLOW
-THROTTLE
-```
-
-Dopo una nuova finestra:
-
-```text
-ALLOW con generation maggiore
-```
-
-### Test con `MAX = 0`
-
-È stato verificato:
-
-```text
-THROTTLE
-THROTTLE
-THROTTLE
-```
-
-anche dopo la scadenza di una nuova finestra.
-
-### Reset tramite `MAX_SET`
-
-Con:
-
-```text
-MAX 0 → MAX 2
-```
-
-il risultato immediato è stato:
-
-```text
-ALLOW
-ALLOW
-THROTTLE
-```
-
-Senza attendere il timer, cambiando:
-
-```text
-MAX 2 → MAX 1
-```
-
-è stato osservato:
-
-```text
-ALLOW
-THROTTLE
-```
-
-Questo conferma che `MAX_SET` azzera il budget e incrementa la generazione.
-
-### Rimozione della strumentazione
-
-Terminati i test, `PING` è stato ripristinato come semplice controllo del device.
-
-Con:
-
-```text
-monitor attivo
-MAX = 0
-```
-
-`PING` restituisce comunque successo e non consulta più il rate limiter.
-
----
-
-## 53. Test multicore del limite globale
-
-È stato realizzato un test temporaneo con:
-
-```text
-64 thread
-barriera pthread
-MAX = 10
-rilascio simultaneo
-```
-
-Risultato:
-
-```text
-Thread totali: 64
-ALLOW: 10
-THROTTLE: 54
-Errori inattesi: 0
-```
-
-Il test dimostra che lo spinlock rende atomica la verifica e l’incremento di `admitted`, impedendo il superamento di `MAX` anche con richieste concorrenti su più CPU.
-
-Il sorgente dipendeva dalla strumentazione temporanea di `PING` ed è stato rimosso dopo la prova. Verrà sostituito in M8/M9 da un test end-to-end su system call realmente intercettate.
-
----
-
 ## 54. Test concorrente permanente delle transizioni
 
 La directory:
@@ -4115,7 +3969,6 @@ Dopo le statistiche:
 
 ```text
 [M1] Character device minimale                          COMPLETATO
-[M2] UAPI e primo ioctl PING                            COMPLETATO
 [M3] Stato ENABLE/DISABLE/GET_STATUS                    COMPLETATO
 [M4] Registro UID                                       COMPLETATO
 [M5] Registro nomi degli eseguibili                     COMPLETATO

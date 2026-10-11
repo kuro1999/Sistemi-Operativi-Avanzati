@@ -31,7 +31,6 @@ Sono già disponibili:
 - protezione dalla rimozione del modulo mentre il device è aperto;
 - una UAPI condivisa tra kernel e user-space;
 - comunicazione tramite `ioctl()`;
-- comando di test `PING`;
 - stato persistente del monitor: attivo oppure disattivato;
 - comandi `ENABLE`, `DISABLE` e `GET_STATUS`;
 - controllo dei privilegi basato sull’effective UID;
@@ -156,7 +155,6 @@ Contiene:
 ### Comandi generali
 
 ```c
-ST_IOCTL_PING
 ST_IOCTL_ENABLE
 ST_IOCTL_DISABLE
 ST_IOCTL_GET_STATUS
@@ -762,7 +760,6 @@ ST_IOCTL_UID_REMOVE
 Le operazioni di sola lettura sono:
 
 ```text
-ST_IOCTL_PING
 ST_IOCTL_GET_STATUS
 ST_IOCTL_UID_GET_COUNT
 ST_IOCTL_UID_LIST
@@ -781,7 +778,6 @@ La sicurezza non dipende dal controller `stctl`: un programma alternativo che in
 ## 15. Comandi disponibili in `stctl`
 
 ```bash
-./stctl ping
 ./stctl status
 ./stctl enable
 ./stctl disable
@@ -814,7 +810,6 @@ Il modulo registra attualmente:
 - registrazione e deregistrazione del device;
 - caricamento e rimozione del modulo;
 - apertura e chiusura del device;
-- ricezione di `PING`;
 - lettura dello stato;
 - attivazione e disattivazione del monitor;
 - tentativi non autorizzati;
@@ -1119,7 +1114,6 @@ Successivamente verranno implementati:
 
 ```text
 [M1] Character device minimale                     COMPLETATO
-[M2] UAPI e primo ioctl PING                       COMPLETATO
 [M3] Stato ENABLE/DISABLE/GET_STATUS               COMPLETATO
 [M4] Registro UID                                  COMPLETATO
 [M5] Registro nomi degli eseguibili                DA IMPLEMENTARE

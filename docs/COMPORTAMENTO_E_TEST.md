@@ -1,3 +1,16 @@
+## Aggiornamento controllo device (11 ottobre 2026)
+
+Il comando diagnostico senza dati e' stato rimosso dall'UAPI, dal dispatcher
+e dalla CLI. Il numero ioctl 0x00 rimane ritirato: con monitor OFF restituisce
+ENOTTY; quando il monitor e la policy lo selezionano, segue il normale throttling
+prima del rifiuto. Solo le ioctl tuttora riconosciute sul device hanno il bypass.
+Per verificare il canale di controllo usare `./user/stctl status`.
+I comandi rimanenti e i relativi layout UAPI non cambiano.
+Il test del descriptor duplicato usa GET_STATUS con un buffer valido; il test
+su /dev/null usa lo stesso comando. Restano EFAULT, EPERM, LSM e serializzazione.
+Rimossi anche gli esempi e le sezioni storiche dedicati al comando dismesso.
+Validazione su VM: control_ioctl_regression e disable_regression superati; stress da 600 operazioni concorrenti senza errori. Compilazione riuscita e modulo scaricato al termine.
+
 ## Aggiornamento: rimozione contatori diagnostici (11 ottobre 2026)
 
 Rimossi dallo stato interno, dallo snapshot e dalla CLI i quattro contatori
@@ -251,7 +264,7 @@ Restano le validazioni sui dati effettivi, i privilegi root e l'azzeramento
 necessario delle risposte; budget, sincronizzazione e statistiche non cambiano.
 
 La modifica cambia le dimensioni delle strutture e i valori dei 16 comandi
-ioctl che le trasferiscono. PING, ENABLE e DISABLE restano invariati; anche il vecchio STATS_RESET
+ioctl che le trasferiscono. ENABLE e DISABLE restano invariati; anche il vecchio STATS_RESET
 restava invariato in quella modifica, prima della successiva rimozione.
 I vecchi binari non sono compatibili: scaricare il modulo precedente prima
 di sostituire i file, ricompilare modulo, controller e test, quindi caricare

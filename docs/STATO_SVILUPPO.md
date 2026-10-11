@@ -27,7 +27,6 @@ Sono già disponibili:
 - protezione dalla rimozione del modulo mentre il device è aperto;
 - una UAPI condivisa tra kernel e user-space;
 - comunicazione tramite `ioctl()`;
-- comando di test `PING`;
 - stato persistente del monitor: attivo oppure disattivato;
 - comandi `ENABLE`, `DISABLE` e `GET_STATUS`;
 - controllo dei privilegi basato sull’effective UID;
@@ -123,7 +122,6 @@ Contiene:
 Comandi attualmente definiti:
 
 ```c
-ST_IOCTL_PING
 ST_IOCTL_ENABLE
 ST_IOCTL_DISABLE
 ST_IOCTL_GET_STATUS
@@ -300,7 +298,6 @@ Queste primitive non sostituiscono un lock per strutture complesse, ma sono suff
 Comandi disponibili:
 
 ```bash
-./stctl ping
 ./stctl status
 ./stctl enable
 ./stctl disable
@@ -321,36 +318,6 @@ Il programma valida il comando prima di aprire il device.
 ---
 
 ## 4. Funzionamento degli `ioctl`
-
-### `ST_IOCTL_PING`
-
-Serve a verificare il canale di comunicazione tra user-space e kernel.
-
-Percorso:
-
-```text
-./stctl ping
-    ↓
-open()
-    ↓
-ioctl(ST_IOCTL_PING)
-    ↓
-st_device_ioctl()
-    ↓
-return 0
-    ↓
-close()
-```
-
-Non modifica alcuno stato.
-
-Output user-space:
-
-```text
-PING completato correttamente.
-```
-
----
 
 ### `ST_IOCTL_GET_STATUS`
 
@@ -557,7 +524,6 @@ Il modulo registra attualmente:
 - caricamento del modulo;
 - apertura del device;
 - chiusura del device;
-- ricezione del comando `PING`;
 - lettura dello stato;
 - attivazione del monitor;
 - disattivazione del monitor;
@@ -816,7 +782,6 @@ Successivamente verranno introdotti i registri dei programmi e dei numeri di sys
 
 ```text
 [M1] Character device minimale                     COMPLETATO
-[M2] UAPI e primo ioctl PING                       COMPLETATO
 [M3] Stato ENABLE/DISABLE/GET_STATUS               COMPLETATO
 [M4] Registro UID                                  DA IMPLEMENTARE
 [M5] Registro nomi degli eseguibili                DA IMPLEMENTARE

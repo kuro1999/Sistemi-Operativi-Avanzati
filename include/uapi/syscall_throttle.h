@@ -166,12 +166,10 @@ struct st_statistics_snapshot {
  * ma restano soggette ai controlli LSM e ai privilegi del driver.
  */
 
- // Comando minimale usato per verificare la comunicazione con il driver.
 /* Il bypass vale solo per comandi ST_IOCTL_* riconosciuti sul device.
  * Non comprende apertura del device o avvio del controller.
  */
-#define ST_IOCTL_PING \
-    _IO(ST_IOCTL_MAGIC, 0x00)
+/* Il numero 0x00 e' ritirato e non deve essere riutilizzato. */
 
 /*
  * Attivazione e disattivazione del monitor.

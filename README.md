@@ -31,7 +31,6 @@ nanosleep x86-64 (35); viene selezionato soltanto l'eseguibile di prova.
 
 ```bash
 sudo insmod module/syscall_throttle.ko
-./user/stctl ping
 sudo ./user/stctl program-add syscall_hook_smoke
 sudo ./user/stctl syscall-add 35
 sudo ./user/stctl max-set 1
