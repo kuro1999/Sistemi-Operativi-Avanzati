@@ -17,6 +17,18 @@ static LIST_HEAD(st_uid_entries);
 static DECLARE_RWSEM(st_uid_registry_lock);
 static unsigned int st_uid_entries_count;
 
+/* Richiede il lock del registro in lettura o scrittura.
+ * Il puntatore restituito resta protetto solo finche' il lock e' acquisito. */
+static struct st_uid_entry *st_uid_find_locked(kuid_t uid)
+{
+    struct st_uid_entry *entry;
+
+    list_for_each_entry(entry, &st_uid_entries, node)
+        if (uid_eq(entry->uid, uid))
+            return entry;
+    return NULL;
+}
+
 void st_uid_registry_init(void)
 {
     INIT_LIST_HEAD(&st_uid_entries);
@@ -46,7 +58,6 @@ void st_uid_registry_exit(void)
 
 int st_uid_registry_add(kuid_t uid)
 {
-    struct st_uid_entry *entry;
     struct st_uid_entry *new_entry;
 
     if (!uid_valid(uid))
@@ -60,12 +71,10 @@ int st_uid_registry_add(kuid_t uid)
 
     down_write(&st_uid_registry_lock);
 
-    list_for_each_entry(entry, &st_uid_entries, node) {
-        if (uid_eq(entry->uid, uid)) {
-            up_write(&st_uid_registry_lock);
-            kfree(new_entry);
-            return -EEXIST;
-        }
+    if (st_uid_find_locked(uid) != NULL) {
+        up_write(&st_uid_registry_lock);
+        kfree(new_entry);
+        return -EEXIST;
     }
 
     list_add_tail(&new_entry->node, &st_uid_entries);
@@ -78,22 +87,17 @@ int st_uid_registry_add(kuid_t uid)
 
 int st_uid_registry_remove(kuid_t uid)
 {
-    struct st_uid_entry *entry;
-    struct st_uid_entry *next;
-    struct st_uid_entry *removed_entry = NULL;
+    struct st_uid_entry *removed_entry;
 
     if (!uid_valid(uid))
         return -EINVAL;
 
     down_write(&st_uid_registry_lock);
 
-    list_for_each_entry_safe(entry, next, &st_uid_entries, node) {
-        if (uid_eq(entry->uid, uid)) {
-            list_del(&entry->node);
-            st_uid_entries_count--;
-            removed_entry = entry;
-            break;
-        }
+    removed_entry = st_uid_find_locked(uid);
+    if (removed_entry != NULL) {
+        list_del(&removed_entry->node);
+        st_uid_entries_count--;
     }
 
     up_write(&st_uid_registry_lock);
@@ -107,20 +111,14 @@ int st_uid_registry_remove(kuid_t uid)
 
 bool st_uid_registry_contains(kuid_t uid)
 {
-    struct st_uid_entry *entry;
-    bool found = false;
+    bool found;
 
     if (!uid_valid(uid))
         return false;
 
     down_read(&st_uid_registry_lock);
 
-    list_for_each_entry(entry, &st_uid_entries, node) {
-        if (uid_eq(entry->uid, uid)) {
-            found = true;
-            break;
-        }
-    }
+    found = st_uid_find_locked(uid) != NULL;
 
     up_read(&st_uid_registry_lock);
 

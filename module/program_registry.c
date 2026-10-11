@@ -48,6 +48,18 @@ static int st_program_name_validate(const char *name)
     return 0;
 }
 
+/* Richiede il lock del registro in lettura o scrittura.
+ * Il puntatore restituito resta protetto solo finche' il lock e' acquisito. */
+static struct st_program_entry *st_program_find_locked(const char *name)
+{
+    struct st_program_entry *entry;
+
+    list_for_each_entry(entry, &st_program_entries, node)
+        if (strcmp(entry->name, name) == 0)
+            return entry;
+    return NULL;
+}
+
 void st_program_registry_init(void)
 {
     INIT_LIST_HEAD(&st_program_entries);
@@ -80,7 +92,6 @@ void st_program_registry_exit(void)
 
 int st_program_registry_add(const char *name)
 {
-    struct st_program_entry *entry;
     struct st_program_entry *new_entry;
     int ret;
 
@@ -102,12 +113,10 @@ int st_program_registry_add(const char *name)
 
     down_write(&st_program_registry_lock);
 
-    list_for_each_entry(entry, &st_program_entries, node) {
-        if (strcmp(entry->name, name) == 0) {
-            up_write(&st_program_registry_lock);
-            kfree(new_entry);
-            return -EEXIST;
-        }
+    if (st_program_find_locked(name) != NULL) {
+        up_write(&st_program_registry_lock);
+        kfree(new_entry);
+        return -EEXIST;
     }
 
     list_add_tail(&new_entry->node, &st_program_entries);
@@ -120,9 +129,7 @@ int st_program_registry_add(const char *name)
 
 int st_program_registry_remove(const char *name)
 {
-    struct st_program_entry *entry;
-    struct st_program_entry *next;
-    struct st_program_entry *removed_entry = NULL;
+    struct st_program_entry *removed_entry;
     int ret;
 
     ret = st_program_name_validate(name);
@@ -131,16 +138,10 @@ int st_program_registry_remove(const char *name)
 
     down_write(&st_program_registry_lock);
 
-    list_for_each_entry_safe(entry,
-                             next,
-                             &st_program_entries,
-                             node) {
-        if (strcmp(entry->name, name) == 0) {
-            list_del(&entry->node);
-            st_program_entries_count--;
-            removed_entry = entry;
-            break;
-        }
+    removed_entry = st_program_find_locked(name);
+    if (removed_entry != NULL) {
+        list_del(&removed_entry->node);
+        st_program_entries_count--;
     }
 
     up_write(&st_program_registry_lock);
@@ -154,20 +155,14 @@ int st_program_registry_remove(const char *name)
 
 bool st_program_registry_contains(const char *name)
 {
-    struct st_program_entry *entry;
-    bool found = false;
+    bool found;
 
     if (st_program_name_validate(name) != 0)
         return false;
 
     down_read(&st_program_registry_lock);
 
-    list_for_each_entry(entry, &st_program_entries, node) {
-        if (strcmp(entry->name, name) == 0) {
-            found = true;
-            break;
-        }
-    }
+    found = st_program_find_locked(name) != NULL;
 
     up_read(&st_program_registry_lock);
 
