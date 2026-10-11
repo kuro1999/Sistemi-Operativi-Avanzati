@@ -133,8 +133,7 @@ struct st_max_config {
  *   blocked_thread_time_ns / observation_ns
  *
  * Un cambio effettivo di MAX a monitor ON apre una nuova osservazione.
- * I waiter presenti sono inclusi nei contatori relevant/blocked e nel
- * picco iniziale. Il loro delay decorre dall'inizio della nuova sessione.
+ * I waiter presenti sono inclusi nel numero corrente e nel picco iniziale. Il loro delay decorre dall'inizio della nuova sessione.
  * MAX invariato non azzera; MAX_SET a monitor OFF conserva lo snapshot.
  * Budget consumato e scadenza della finestra non vengono azzerati.
  *
@@ -147,11 +146,6 @@ struct st_max_config {
 struct st_statistics_snapshot {
     __aligned_u64 observation_ns;
     __aligned_u64 blocked_thread_time_ns;
-
-    __aligned_u64 relevant_invocations;
-    __aligned_u64 blocked_invocations;
-    __aligned_u64 completed_blocked_invocations;
-    __aligned_u64 interrupted_blocked_invocations;
 
     __aligned_u64 peak_delay_ns;
 

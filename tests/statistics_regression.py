@@ -22,21 +22,17 @@ def ctl(*args, root=False):
 
 
 def snapshot(n):
+    # La coppia restituita contiene soltanto (waiter correnti, picco).
     text = ctl("stats")
     f = dict(line.split(": ", 1) for line in text.splitlines() if ": " in line)
-    r = int(f["Invocazioni rilevanti"])
-    b = int(f["Invocazioni bloccate"])
-    c = int(f["Invocazioni bloccate completate"])
-    i = int(f["Attese interrotte da segnale"])
     w = int(f["Thread attualmente bloccati"])
     p = int(f["Picco thread bloccati"])
     avg = float(f["Media temporale thread bloccati"])
     elapsed = float(f["Durata osservazione"].split()[0])
     assert f["Sessione statistiche"] == "attiva", text
     assert 0 <= w <= p <= n, text
-    assert c + i + w == b <= r <= n, text
     assert 0 <= avg <= p + 0.000002, text
-    return text, f, (r, b, c, i, w, p), elapsed
+    return text, f, (w, p), elapsed
 
 
 def run_case(n):
@@ -74,7 +70,7 @@ def run_case(n):
         deadline = time.monotonic() + 5
         while True:
             text, _, counters, _ = snapshot(n)
-            if counters[4] == n:
+            if counters[0] == n:
                 break
             if time.monotonic() >= deadline:
                 raise RuntimeError("Timeout in attesa dei waiter:\n" + text)
@@ -101,7 +97,7 @@ def run_case(n):
             reads = sum(future.result() for future in readers)
 
         text, f, counters, elapsed = snapshot(n)
-        assert counters == (n, n, n, 0, 0, n), text
+        assert counters == (0, n), text
         assert int(f["Effective UID del peak"]) == os.geteuid(), text
         assert f["Programma del peak"] == "syscall_hook_smoke", text
         peak = int(f["Peak delay"].split()[0])

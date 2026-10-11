@@ -111,17 +111,11 @@ static void probe_blocked(int fd, unsigned long cmd)
     wait_ok(pid);
     /* Verifica il waiter trasferito prima del successivo reset. */
     command(ST_IOCTL_STATS_GET, &s);
-    require(s.relevant_invocations == 1 && s.blocked_invocations == 1 &&
-            s.completed_blocked_invocations == 1 &&
-            s.interrupted_blocked_invocations == 0 &&
-            s.current_blocked == 0,
+    require(s.current_blocked == 0 && s.peak_blocked == 1 && s.peak_valid,
             "statistiche della singola ioctl dopo MAX=1");
     set_max(0);
     command(ST_IOCTL_STATS_GET, &s);
-    require(s.relevant_invocations == 0 && s.blocked_invocations == 0 &&
-            s.completed_blocked_invocations == 0 &&
-            s.interrupted_blocked_invocations == 0 &&
-            s.current_blocked == 0,
+    require(s.current_blocked == 0 && s.peak_blocked == 0 && !s.peak_valid,
             "nuova sessione MAX=0 non vuota");
 }
 
@@ -184,8 +178,7 @@ static void run_test(void)
     command(ST_IOCTL_PROGRAM_ADD, &program);
     command(ST_IOCTL_ENABLE, NULL);
     command(ST_IOCTL_STATS_GET, &stats);
-    require(stats.relevant_invocations == 0 &&
-            stats.current_blocked == 0,
+    require(stats.current_blocked == 0 && stats.peak_blocked == 0 && !stats.peak_valid,
             "sessione isolata non vuota");
     message("FASE ISOLATA: selezione per programma, nessun UID registrato\n");
 
@@ -197,11 +190,7 @@ static void run_test(void)
 
     command(ST_IOCTL_STATS_GET, &stats);
     /* Ogni probe ha gia' verificato il completamento nella sua sessione. */
-    require(stats.relevant_invocations == 0 &&
-            stats.blocked_invocations == 0 &&
-            stats.completed_blocked_invocations == 0 &&
-            stats.interrupted_blocked_invocations == 0 &&
-            stats.current_blocked == 0,
+    require(stats.current_blocked == 0 && stats.peak_blocked == 0 && !stats.peak_valid,
             "sessione finale MAX=0 non vuota");
 
     command(ST_IOCTL_DISABLE, NULL);

@@ -20,7 +20,7 @@ def run_case(n):
     try:
         ctl("enable", root=True)
         report, _, counts, _ = snapshot(n)
-        check(counts == (0, 0, 0, 0, 0, 0),
+        check(counts == (0, 0),
               "Sessione nuova con contatori non vuoti:\n" + report)
 
         for _ in range(n):
@@ -34,7 +34,7 @@ def run_case(n):
             report, _, counts, _ = snapshot(n)
             check(all(w.poll() is None for w in workers),
                   "Un worker e' terminato con MAX=0")
-            if counts == (n, n, 0, 0, n, n):
+            if counts == (n, n):
                 break
             check(time.monotonic() < deadline,
                   "Non osservati tutti i waiter:\n" + report)
@@ -64,9 +64,6 @@ def run_case(n):
             for line in frozen.splitlines() if ": " in line)
 
         expected = {
-            "Invocazioni rilevanti": n,
-            "Invocazioni bloccate": n,
-            "Attese interrotte da segnale": 0,
             "Thread attualmente bloccati": 0,
             "Picco thread bloccati": n,
         }
@@ -75,8 +72,6 @@ def run_case(n):
         for key, value in expected.items():
             check(int(fields[key]) == value, frozen)
 
-        completed = int(fields["Invocazioni bloccate completate"])
-        check(completed == n, frozen)
         check(int(fields["Peak delay"].split()[0]) > 0, frozen)
         check(int(fields["Effective UID del peak"]) == os.geteuid(), frozen)
         check(fields["Programma del peak"] == "syscall_hook_smoke", frozen)

@@ -37,7 +37,7 @@ def run_case(label, identities, order, uid, gid):
         deadline = time.monotonic() + 5
         while True:
             text, _, counters, _ = snapshot(1)
-            if counters[4] == 1:
+            if counters[0] == 1:
                 break
             if time.monotonic() >= deadline:
                 raise RuntimeError("Waiter non osservato:\n" + text)
@@ -48,7 +48,7 @@ def run_case(label, identities, order, uid, gid):
             deadline = time.monotonic() + 0.3
             while time.monotonic() < deadline:
                 text, _, counters, _ = snapshot(1)
-                assert counters == (1, 1, 0, 0, 1, 1), text
+                assert counters == (1, 1), text
                 assert worker.poll() is None, "Worker liberato troppo presto"
                 time.sleep(0.02)
             print(label + ": blocco mantenuto con un criterio residuo",
@@ -58,7 +58,7 @@ def run_case(label, identities, order, uid, gid):
         _, error = worker.communicate(timeout=1.5)
         assert worker.returncode == 0, error
         text, fields, counters, _ = snapshot(1)
-        assert counters == (1, 1, 1, 0, 0, 1), text
+        assert counters == (0, 1), text
         assert int(fields["Effective UID del peak"]) == uid, text
         assert fields["Programma del peak"] == "syscall_hook_smoke", text
         print("PASS: " + label, flush=True)

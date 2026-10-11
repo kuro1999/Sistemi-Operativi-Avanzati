@@ -66,7 +66,7 @@ def main():
                 report, _, counts, _ = snapshot(N + 1)
                 check(all(w.poll() is None for w in workers),
                       "Worker terminato prima delle modifiche")
-                if counts == (N, N, 0, 0, N, N):
+                if counts == (N, N):
                     break
                 check(time.monotonic() < deadline,
                       "Waiter mancanti:\n" + report)
@@ -105,6 +105,12 @@ def main():
             check(samples > 0,
                   "Nessuno snapshot durante le modifiche")
 
+            # Drena i worker precedenti e ripristina la policy per isolare il sentinel.
+            change("syscall", False)
+            for worker in workers:
+                check(worker.wait(timeout=5) == 0, "Worker concorrente fallito")
+            change("syscall", True)
+
             # Programma e syscall sono di nuovo registrati.
             # Verifichiamo il blocco di una nuova chiamata.
             sentinel = spawn()
@@ -113,11 +119,7 @@ def main():
                 report, _, counts, _ = snapshot(N + 1)
                 check(sentinel.poll() is None,
                       "Nuovo worker passato con MAX=0")
-                if (
-                    counts[0] == N + 1
-                    and counts[1] == N + 1
-                    and counts[4] >= 1
-                ):
+                if counts[0] == 1:
                     break
                 check(time.monotonic() < deadline,
                       "Nuovo waiter non osservato:\n" + report)
@@ -134,9 +136,9 @@ def main():
 
             report, _, counts, _ = snapshot(N + 1)
             check(
-                counts[:5] == (N + 1, N + 1, N + 1, 0, 0),
+                counts[0] == 0,
                 report)
-            check(N <= counts[5] <= N + 1, report)
+            check(N <= counts[1] <= N + 1, report)
 
             print(
                 f"PASS giro {round_number}/{ROUNDS}: "

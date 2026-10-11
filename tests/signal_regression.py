@@ -31,7 +31,7 @@ def run_case(sig):
             report, _, counts, _ = snapshot(1)
             check(worker.poll() is None,
                   "Worker terminato prima del segnale")
-            if counts == (1, 1, 0, 0, 1, 1):
+            if counts == (1, 1):
                 break
             check(time.monotonic() < deadline,
                   "Waiter non osservato:\n" + report)
@@ -45,7 +45,7 @@ def run_case(sig):
               f"Exit code inatteso: {worker.returncode}\n{output}")
 
         report, fields, counts, _ = snapshot(1)
-        check(counts == (1, 1, 0, 1, 0, 1), report)
+        check(counts == (0, 1), report)
         check(fields["Peak delay"] == "non disponibile", report)
 
         print(

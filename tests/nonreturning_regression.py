@@ -84,7 +84,7 @@ def run_case(binary, nr, extra_threads):
         deadline = time.monotonic() + 5
         while True:
             text, _, counts, _ = snapshot(1)
-            if counts == (1, 1, 0, 0, 1, 1):
+            if counts == (1, 1):
                 break
             check(worker.poll() is None,
                   "Worker terminato prima dell'ammissione")
@@ -93,7 +93,7 @@ def run_case(binary, nr, extra_threads):
 
         time.sleep(0.10)
         text, _, counts, _ = snapshot(1)
-        check(counts == (1, 1, 0, 0, 1, 1), text)
+        check(counts == (1, 1), text)
         check(worker.poll() is None, "Worker gia' terminato")
         check(len(list(taskdir.iterdir())) == extra_threads + 1,
               "Thread terminati mentre la syscall era nel limiter")
@@ -106,7 +106,7 @@ def run_case(binary, nr, extra_threads):
               "Task ancora presenti dopo la terminazione")
 
         text, fields, counts, elapsed = snapshot(1)
-        check(counts == (1, 1, 1, 0, 0, 1), text)
+        check(counts == (0, 1), text)
         check(int(fields["Effective UID del peak"]) == os.geteuid(), text)
         check(fields["Programma del peak"] == NAME, text)
         peak = int(fields["Peak delay"].split()[0])

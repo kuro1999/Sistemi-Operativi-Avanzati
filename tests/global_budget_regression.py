@@ -85,7 +85,7 @@ def run(directory, uid, gid):
             worker.stdin.flush()
             worker.stdin.close()
 
-        expected = (N, N - MAX, 0, 0, N - MAX, N - MAX)
+        expected = (N - MAX, N - MAX)
         samples, first, latest = 0, None, 0.0
         while True:
             report, _, counters, _ = snapshot(N)
@@ -127,7 +127,7 @@ def run(directory, uid, gid):
                     f"Worker terminato con codice {code}")
 
         report, _, counters, _ = snapshot(N)
-        if counters != (N, N - MAX, N - MAX, 0, 0, N - MAX):
+        if counters != (0, N - MAX):
             raise RuntimeError(
                 "Statistiche finali inattese:\n" + report)
 

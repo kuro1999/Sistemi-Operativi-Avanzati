@@ -97,14 +97,14 @@ def run(binary):
         ctl("enable", root=True)
 
         gates[0].sendall(b"G")
-        wait_counts((1, 1, 0, 0, 1, 1))
+        wait_counts((1, 1))
         print(
             "PASS: read inizialmente sospesa dal throttling",
             flush=True)
 
         t0 = time.monotonic()
         ctl("max-set", "1", root=True)
-        wait_counts((1, 1, 1, 0, 0, 1))
+        wait_counts((0, 1))
 
         if select.select([reader.stdout], [], [], 0)[0]:
             raise RuntimeError(
@@ -116,7 +116,7 @@ def run(binary):
             flush=True)
 
         gates[1].sendall(b"G")
-        wait_counts((2, 2, 1, 0, 1, 1))
+        wait_counts((1, 1))
 
         if time.monotonic() - t0 >= 0.70:
             raise RuntimeError(
@@ -133,7 +133,7 @@ def run(binary):
         if probe.wait(timeout=3) != 0:
             raise RuntimeError("getpid fallita")
 
-        report = wait_counts((2, 2, 2, 0, 0, 1))
+        report = wait_counts((0, 1))
         if select.select([reader.stdout], [], [], 0)[0]:
             raise RuntimeError(
                 "La read non e' piu' in attesa dei dati")
@@ -149,7 +149,7 @@ def run(binary):
         if reader.wait(timeout=3) != 0:
             raise RuntimeError("read fallita")
 
-        wait_counts((2, 2, 2, 0, 0, 1))
+        wait_counts((0, 1))
         print(
             "PASS: read completata dopo l'invio del dato",
             flush=True)

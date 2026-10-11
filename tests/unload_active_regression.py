@@ -43,7 +43,7 @@ def run(binary):
         ctl("enable", root=True)
 
         parent.sendall(b"G")
-        wait_counts((1, 0, 0, 0, 0, 0))
+        wait_counts((0, 0))
         wait_pipe_read(worker, read_fd)
 
         unloading = subprocess.Popen(

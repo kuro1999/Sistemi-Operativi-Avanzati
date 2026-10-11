@@ -71,7 +71,7 @@ def run(binary):
         ctl("enable", root=True)
 
         parent.sendall(b"G")
-        wait_counts((1, 0, 0, 0, 0, 0))
+        wait_counts((0, 0))
         wait_pipe_read(worker, read_fd)
         print(
             "PASS: prima read ammessa senza attesa nel limiter",
@@ -83,10 +83,10 @@ def run(binary):
 
         worker.send_signal(signal.SIGUSR1)
         token(worker, b"S")
-        wait_counts((1, 1, 0, 0, 1, 1))
+        wait_counts((1, 1))
         print(
             "PASS: read riavviata e bloccata da MAX=0; "
-            "zero interruzioni delle attese del limiter",
+            "waiter osservato nel limiter",
             flush=True)
 
         os.write(write_fd, b"X")
@@ -94,7 +94,7 @@ def run(binary):
               "Read completata con MAX=0")
         check(bool(select.select([read_fd], [], [], 0)[0]),
               "Byte consumato con MAX=0")
-        wait_counts((1, 1, 0, 0, 1, 1))
+        wait_counts((1, 1))
 
         print(
             "PASS: il dato disponibile non permette "
@@ -108,7 +108,7 @@ def run(binary):
         check(not select.select([read_fd], [], [], 0)[0],
               "Byte non consumato")
 
-        print(wait_counts((1, 1, 1, 0, 0, 1)), flush=True)
+        print(wait_counts((0, 1)), flush=True)
         print(
             "PASS: read riavviata completata dopo nuova ammissione",
             flush=True)

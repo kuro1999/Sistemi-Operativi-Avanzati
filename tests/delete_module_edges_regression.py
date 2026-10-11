@@ -85,7 +85,7 @@ def run_case(binary, target, mode):
             deadline = time.monotonic() + 5
             while True:
                 text, _, counts, _ = snapshot(1)
-                if counts == (1, 1, 0, 0, 1, 1):
+                if counts == (1, 1):
                     break
                 check(worker.poll() is None,
                       "Worker terminato prima del blocco")
@@ -118,10 +118,10 @@ def run_case(binary, target, mode):
 
         text, fields, counts, _ = snapshot(1)
         expected_counts = {
-            "force": (1, 1, 1, 0, 0, 1),
-            "unmatched": (0, 0, 0, 0, 0, 0),
-            "usr1": (1, 1, 0, 1, 0, 1),
-            "kill": (1, 1, 0, 1, 0, 1),
+            "force": (0, 1),
+            "unmatched": (0, 0),
+            "usr1": (0, 1),
+            "kill": (0, 1),
         }[mode]
         check(counts == expected_counts, text)
         if mode != "force":

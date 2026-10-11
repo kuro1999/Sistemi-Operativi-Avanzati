@@ -41,7 +41,7 @@ def main():
         workers.append(first)
         check(first.wait(timeout=3) == 0, "Primo worker fallito")
         text, _, counts, _ = snapshot(2)
-        check(counts == (1, 0, 0, 0, 0, 0), text)
+        check(counts == (0, 0), text)
         print("Prima chiamata completata: budget MAX=1 consumato",
               flush=True)
 
@@ -54,7 +54,7 @@ def main():
             text, _, counts, _ = snapshot(2)
             check(time.monotonic() - start < 0.40,
                   "INCONCLUDENTE: preparazione troppo lenta; ripetere il test")
-            if counts == (2, 1, 0, 0, 1, 1):
+            if counts == (1, 1):
                 break
             check(second.poll() is None,
                   "Secondo worker terminato prima del blocco atteso:\n" + text)
@@ -71,7 +71,7 @@ def main():
             elapsed = time.monotonic() - start
             if elapsed >= 0.70:
                 break
-            check(counts == (2, 1, 0, 0, 1, 1),
+            check(counts == (1, 1),
                   "FAIL: ripetere MAX_SET(1) ha liberato la seconda "
                   f"chiamata entro {elapsed:.3f} s da prima di ENABLE.\n"
                   + text)
@@ -85,7 +85,7 @@ def main():
 
         check(second.wait(timeout=3) == 0, "Secondo worker fallito")
         text, _, counts, _ = snapshot(2)
-        check(counts == (2, 1, 1, 0, 0, 1), text)
+        check(counts == (0, 1), text)
         print("PASS: seconda chiamata completata al rinnovo del budget",
               flush=True)
         print(text, flush=True)

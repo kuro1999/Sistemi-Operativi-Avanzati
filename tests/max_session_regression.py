@@ -60,14 +60,14 @@ def main():
             workers.append(subprocess.Popen(
                 [WORKER, "20"], stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL))
-        wait_for(lambda c: c == (N, N, 0, 0, N, N))
+        wait_for(lambda c: c == (N, N))
         time.sleep(0.35)
         _, _, _, old_elapsed = snapshot(N)
 
         ctl("max-set", "1", root=True)
-        text, fields, counts, elapsed = wait_for(lambda c: c[2] >= 1)
-        check(counts[0:2] == (N, N) and counts[3] == 0, text)
-        check(counts[4] > 0,
+        text, fields, counts, elapsed = wait_for(lambda c: c[0] < N)
+        check(counts[1] == N, text)
+        check(counts[0] > 0,
               "INCONCLUDENTE: nessun waiter rimasto; ripetere")
         peak_in_session(text, fields, elapsed)
         print("PASS: MAX 0 -> 1 trasferisce i waiter; peak limitato "
@@ -78,10 +78,10 @@ def main():
         # Il numero trasferito dipende dalle ammissioni prima di MAX=0.
         ctl("max-set", "0", root=True)
         text, fields, counts, elapsed = snapshot(N)
-        carried = counts[4]
+        carried = counts[0]
         check(0 < carried < N,
               "INCONCLUDENTE: nessun trasferimento osservabile; ripetere")
-        expected = (carried, carried, 0, 0, carried, carried)
+        expected = (carried, carried)
         check(counts == expected, text)
         check(fields["Peak delay"] == "non disponibile", text)
         print(f"PASS: MAX 1 -> 0 apre una nuova sessione con "
@@ -113,10 +113,6 @@ def main():
                       if ": " in line)
         check(fields["Sessione statistiche"] == "inattiva", frozen)
         for key, value in {
-            "Invocazioni rilevanti": carried,
-            "Invocazioni bloccate": carried,
-            "Invocazioni bloccate completate": carried,
-            "Attese interrotte da segnale": 0,
             "Thread attualmente bloccati": 0,
             "Picco thread bloccati": carried,
         }.items():

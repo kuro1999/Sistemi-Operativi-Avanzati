@@ -84,7 +84,7 @@ def run_case(binary, target, expected):
         deadline = time.monotonic() + 5
         while True:
             report, _, counts, _ = snapshot(1)
-            if counts == (1, 1, 0, 0, 1, 1):
+            if counts == (1, 1):
                 break
             check(worker.poll() is None,
                   "Worker terminato prima del blocco")
@@ -94,7 +94,7 @@ def run_case(binary, target, expected):
 
         time.sleep(0.10)
         report, _, counts, _ = snapshot(1)
-        check(counts == (1, 1, 0, 0, 1, 1), report)
+        check(counts == (1, 1), report)
         check((MODROOT / target).exists(),
               "Bersaglio rimosso con MAX=0")
         check(refcount() >= base + 1,
@@ -112,7 +112,7 @@ def run_case(binary, target, expected):
               "Stato del bersaglio inatteso")
 
         report, fields, counts, elapsed = snapshot(1)
-        check(counts == (1, 1, 1, 0, 0, 1), report)
+        check(counts == (0, 1), report)
         check(int(fields["Effective UID del peak"]) == 0, report)
         check(fields["Programma del peak"] == NAME, report)
         peak = int(fields["Peak delay"].split()[0])

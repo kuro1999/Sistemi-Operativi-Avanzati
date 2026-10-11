@@ -26,11 +26,6 @@ struct st_statistics_state {
     /* Integrale temporale di current_blocked: somma di current_blocked * elapsed_ns. */
     u64 blocked_thread_time_ns;
 
-    u64 relevant_invocations;
-    u64 blocked_invocations;
-    u64 completed_blocked_invocations;
-    u64 interrupted_blocked_invocations;
-
     u64 peak_delay_ns;
 
     u32 current_blocked;
@@ -65,13 +60,6 @@ static u64 st_statistics_saturating_multiply(u64 value, u32 multiplier)
         return U64_MAX;
     }
     return result;
-}
-
-static u64 st_statistics_saturating_increment(u64 value)
-{
-    if (value == U64_MAX)
-        return U64_MAX;
-    return value + 1U;
 }
 
 /* Generazione non nulla; il wrap-around richiederebbe 2^64 nuove sessioni. */
@@ -137,8 +125,6 @@ void st_statistics_max_changed(void)
         st_statistics.continuity_generation = continuity;
         st_statistics.current_blocked = carried;
         st_statistics.peak_blocked = carried;
-        st_statistics.relevant_invocations = carried;
-        st_statistics.blocked_invocations = carried;
     }
     spin_unlock_irqrestore(&st_statistics_lock, flags);
 }
@@ -217,7 +203,7 @@ void st_statistics_session_stop(void)
                 "generazione=%llu, waiter_residui=0\n", (unsigned long long)generation);
 }
 
-u64 st_statistics_record_relevant_invocation(void)
+u64 st_statistics_get_invocation_generation(void)
 {
     unsigned long flags;
     u64 generation;
@@ -226,9 +212,6 @@ u64 st_statistics_record_relevant_invocation(void)
 
     spin_lock_irqsave(&st_statistics_lock, flags);
     if (st_statistics.session_active && !st_statistics.session_closing) {
-        /* Contatore e generazione appartengono allo stesso snapshot sotto lock. */
-        st_statistics.relevant_invocations =
-            st_statistics_saturating_increment(st_statistics.relevant_invocations);
         generation = st_statistics.generation;
     }
     spin_unlock_irqrestore(&st_statistics_lock, flags);
@@ -266,16 +249,11 @@ bool st_statistics_block_begin(struct st_statistics_block_context *context,
         goto out_unlock;
     }
     st_statistics_account_blocked_time_locked(now_ns);
-    /* Rilevante prima di MAX_SET, contabilizzata come bloccata dopo. */
-    if (invocation_generation != st_statistics.generation)
-        st_statistics.relevant_invocations =
-            st_statistics_saturating_increment(st_statistics.relevant_invocations);
+
     st_statistics.current_blocked++;
     if (st_statistics.current_blocked > st_statistics.peak_blocked) {
         st_statistics.peak_blocked = st_statistics.current_blocked;
     }
-    st_statistics.blocked_invocations =
-        st_statistics_saturating_increment(st_statistics.blocked_invocations);
     context->generation = st_statistics.generation;
     /* Il delay parte dalla decisione; la contabilita usa now_ns. */
     context->start_ns = throttle_start_ns;
@@ -323,12 +301,8 @@ static void st_statistics_block_finish(struct st_statistics_block_context *conte
     st_statistics.current_blocked--;
     wake_drain = st_statistics.session_closing && st_statistics.current_blocked == 0U;
     if (interrupted) {
-        st_statistics.interrupted_blocked_invocations =
-            st_statistics_saturating_increment(st_statistics.interrupted_blocked_invocations);
         goto out_unlock;
     }
-    st_statistics.completed_blocked_invocations =
-        st_statistics_saturating_increment(st_statistics.completed_blocked_invocations);
     if (!st_statistics.peak_valid || delay_ns > st_statistics.peak_delay_ns) {
         st_statistics.peak_valid = true;
         st_statistics.peak_delay_ns = delay_ns;
@@ -376,10 +350,6 @@ void st_statistics_get_snapshot(struct st_statistics_snapshot *snapshot)
         snapshot->observation_ns = observation_end_ns - st_statistics.session_start_ns;
     }
     snapshot->blocked_thread_time_ns = st_statistics.blocked_thread_time_ns;
-    snapshot->relevant_invocations = st_statistics.relevant_invocations;
-    snapshot->blocked_invocations = st_statistics.blocked_invocations;
-    snapshot->completed_blocked_invocations = st_statistics.completed_blocked_invocations;
-    snapshot->interrupted_blocked_invocations = st_statistics.interrupted_blocked_invocations;
     snapshot->peak_delay_ns = st_statistics.peak_delay_ns;
     snapshot->current_blocked = st_statistics.current_blocked;
     snapshot->peak_blocked = st_statistics.peak_blocked;

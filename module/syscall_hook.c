@@ -654,8 +654,8 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
         goto call_original;
     }
 
-    /* Conta una sola invocazione, anche in presenza di retry. */
-    statistics_generation = st_statistics_record_relevant_invocation();
+    /* Acquisisce la sessione una sola volta, anche in presenza di retry. */
+    statistics_generation = st_statistics_get_invocation_generation();
 
     for (;;) {
         /* Il token precede i registry; nessun lock resta acquisito. */

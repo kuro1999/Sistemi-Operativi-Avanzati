@@ -9,6 +9,7 @@ import signal
 import socket
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from statistics_regression import ctl, snapshot
@@ -88,7 +89,7 @@ def run(binary):
         ctl("enable", root=True)
 
         parent.sendall(b"G")
-        wait_counts((1, 1, 0, 0, 1, 1))
+        wait_counts((1, 1))
         print(
             "PASS: read sospesa dal limiter "
             "nonostante il dato disponibile",
@@ -96,7 +97,17 @@ def run(binary):
 
         worker.send_signal(signal.SIGUSR1)
         token(worker, b"S")
-        wait_counts((2, 2, 0, 1, 1, 1))
+        wait_counts((1, 1))
+        # Dopo il token dell'handler, osserva un intervallo stabile a MAX=0.
+        deadline = time.monotonic() + 0.15
+        while time.monotonic() < deadline:
+            report, fields, counts, _ = snapshot(2)
+            check(counts == (1, 1), report)
+            check(fields["Peak delay"] == "non disponibile", report)
+            check(worker.poll() is None, "Worker terminato dopo il segnale")
+            check(bool(select.select([read_fd], [], [], 0)[0]),
+                  "Dato consumato dopo il segnale con MAX=0")
+            time.sleep(0.01)
 
         check(worker.poll() is None,
               "Worker terminato con MAX=0")
@@ -115,7 +126,7 @@ def run(binary):
         check(worker.wait(timeout=3) == 0,
               "Worker terminato con errore")
 
-        report = wait_counts((1, 1, 1, 0, 0, 1))
+        report = wait_counts((0, 1))
         check(not select.select([read_fd], [], [], 0)[0],
               "Il byte non e' stato consumato")
 

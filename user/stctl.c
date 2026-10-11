@@ -185,12 +185,6 @@ static int execute_statistics_get(int fd)
     if (snapshot.current_blocked > snapshot.peak_blocked)
         return fail("Snapshot statistiche incoerente: current_blocked > peak_blocked.\n");
 
-    /* La sottrazione evita overflow anche con contatori saturi a U64_MAX. */
-    if (snapshot.completed_blocked_invocations > snapshot.blocked_invocations ||
-        snapshot.interrupted_blocked_invocations >
-            snapshot.blocked_invocations - snapshot.completed_blocked_invocations)
-        return fail("Snapshot statistiche incoerente: eventi conclusi superiori agli eventi di blocco.\n");
-
     if (snapshot.peak_valid != 0U &&
         memchr(snapshot.peak_program, '\0', sizeof(snapshot.peak_program)) == NULL)
         return fail("Snapshot statistiche non valido: nome del programma non terminato da NUL.\n");
@@ -200,12 +194,6 @@ static int execute_statistics_get(int fd)
 
     printf("Sessione statistiche: %s\n", snapshot.session_active != 0U ? "attiva" : "inattiva");
     printf("Durata osservazione: %.6f secondi\n", (double)snapshot.observation_ns / 1000000000.0);
-    printf("Invocazioni rilevanti: %llu\n", (unsigned long long) snapshot.relevant_invocations);
-    printf("Invocazioni bloccate: %llu\n", (unsigned long long) snapshot.blocked_invocations);
-    printf("Invocazioni bloccate completate: %llu\n",
-           (unsigned long long)snapshot.completed_blocked_invocations);
-    printf("Attese interrotte da segnale: %llu\n",
-           (unsigned long long)snapshot.interrupted_blocked_invocations);
     printf("Thread attualmente bloccati: %u\n", snapshot.current_blocked);
     printf("Picco thread bloccati: %u\n", snapshot.peak_blocked);
     printf("Media temporale thread bloccati: %.6f\n", average_blocked);

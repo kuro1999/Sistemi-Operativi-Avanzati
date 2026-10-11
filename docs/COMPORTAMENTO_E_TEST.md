@@ -1,3 +1,26 @@
+## Aggiornamento: rimozione contatori diagnostici (11 ottobre 2026)
+
+Rimossi dallo stato interno, dallo snapshot e dalla CLI i quattro contatori
+`relevant_invocations`, `blocked_invocations`, `completed_blocked_invocations`
+e `interrupted_blocked_invocations`. Restano numero corrente e picco dei waiter,
+integrale e durata per la media temporale, peak delay con programma ed EUID.
+Le sezioni storiche sottostanti che descrivono questi contatori sono superate.
+
+Il token della sessione resta acquisito sotto lo stesso lock tramite
+`st_statistics_get_invocation_generation()`. Invariati ordine dei lock,
+formule, timestamp, gestione delle interruzioni e risvegli. Le attese interrotte
+continuano a non produrre campioni di peak delay.
+
+ABI: snapshot da 336 a 304 byte su x86-64; STATS_GET conserva il numero 0x52
+ma cambia il codice ioctl completo per la nuova dimensione. Modulo, controller
+e helper devono essere ricompilati insieme. 0x50 e 0x51 restano ritirati.
+
+I test usano la coppia (waiter correnti, picco), esiti dei worker, segnali,
+pipe e misure temporali. Non verificano piu' le identita' contabili tra i quattro
+contatori eliminati. Il test di concorrenza drena i worker precedenti prima di
+isolare il sentinel. Non sono stati eliminati scenari di regressione.
+Validazione su VM: 20 regressioni superate tra due esecuzioni e stress da 600 operazioni senza errori. Il test global_budget inizialmente inconclusivo e' passato al secondo tentativo. Stato finale: modulo scaricato.
+
 # Comportamento e test correnti
 
 Aggiornamento: 2 ottobre 2026. La guida descrive le modifiche verificate sulla

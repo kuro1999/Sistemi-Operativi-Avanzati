@@ -62,15 +62,13 @@ void st_statistics_get_snapshot(
     struct st_statistics_snapshot *snapshot);
 
 /*
- * Registra una invocazione risultata rilevante per la policy.
- *
- * Restituisce il token della generazione nella quale
- * relevant_invocations è stato incrementato.
+ * Acquisisce sotto lock il token della sessione per una invocazione
+ * risultata rilevante per la policy.
  *
  * Il valore zero indica che nessuna sessione statistica era
  * attiva al momento della registrazione.
  */
-u64 st_statistics_record_relevant_invocation(void);
+u64 st_statistics_get_invocation_generation(void);
 
 /*
  * Registra il primo ingresso in THROTTLE di una invocazione.

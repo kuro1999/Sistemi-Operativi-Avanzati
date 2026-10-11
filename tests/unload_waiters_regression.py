@@ -51,7 +51,7 @@ def main():
             report, _, counts, _ = snapshot(N)
             check(all(w.poll() is None for w in workers),
                   "Worker terminato prima dello scaricamento")
-            if counts == (N, N, 0, 0, N, N):
+            if counts == (N, N):
                 break
             check(time.monotonic() < deadline,
                   "Waiter mancanti:\n" + report)

@@ -36,12 +36,12 @@ def run_case(initial, new, waiting):
             check(worker.wait(timeout=3) == 0, "Worker iniziale fallito")
 
         text, _, counts, _ = snapshot(total)
-        check(counts == (initial, 0, 0, 0, 0, 0), text)
+        check(counts == (0, 0), text)
 
         for _ in range(waiting):
             spawn()
 
-        expected_initial = (total, waiting, 0, 0, waiting, waiting)
+        expected_initial = (waiting, waiting)
         while True:
             text, _, counts, _ = snapshot(total)
             check(time.monotonic() - start < 0.40,
@@ -58,9 +58,7 @@ def run_case(initial, new, waiting):
 
         released = min(waiting, max(0, new - initial))
         # La nuova sessione include soltanto i waiter trasferiti.
-        expected = (
-            waiting, waiting, released, 0, waiting - released, waiting
-        )
+        expected = (waiting - released, waiting)
 
         # Attendiamo l'effetto dell'eventuale aumento, restando
         # ben prima della scadenza della prima finestra.
@@ -68,7 +66,7 @@ def run_case(initial, new, waiting):
             text, _, counts, _ = snapshot(total)
             check(time.monotonic() - start < 0.55,
                   "INCONCLUDENTE: osservazione tardiva; ripetere")
-            check(counts[2] <= released,
+            check(counts[0] >= waiting - released,
                   "FAIL: MAX_SET ha restituito budget gia' consumato:\n"
                   + text)
             if counts == expected:
@@ -96,7 +94,7 @@ def run_case(initial, new, waiting):
         for worker in workers:
             check(worker.wait(timeout=4) == 0, "Worker fallito")
         text, _, counts, _ = snapshot(total)
-        check(counts == (waiting, waiting, waiting, 0, 0, waiting), text)
+        check(counts == (0, waiting), text)
         print("PASS: tutti i worker completati senza ulteriori modifiche",
               flush=True)
     finally:

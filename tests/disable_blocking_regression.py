@@ -36,7 +36,7 @@ def run(binary):
         ctl("enable", root=True)
 
         parent.sendall(b"G")
-        wait_counts((1, 1, 0, 0, 1, 1))
+        wait_counts((1, 1))
         print("Read sospesa nel limiter; invio DISABLE con pipe ancora vuota",
               flush=True)
 
@@ -55,10 +55,6 @@ def run(binary):
                       if ": " in line)
         check(fields["Sessione statistiche"] == "inattiva", frozen)
         for key, expected in {
-            "Invocazioni rilevanti": 1,
-            "Invocazioni bloccate": 1,
-            "Invocazioni bloccate completate": 1,
-            "Attese interrotte da segnale": 0,
             "Thread attualmente bloccati": 0,
             "Picco thread bloccati": 1,
             "Effective UID del peak": os.geteuid(),

@@ -39,7 +39,7 @@ def main():
         deadline = time.monotonic() + 5
         while True:
             text, _, counters, _ = snapshot(1)
-            if counters[4] == 1:
+            if counters[0] == 1:
                 break
             if time.monotonic() >= deadline:
                 raise RuntimeError("Waiter non osservato:\n" + text)
@@ -66,7 +66,7 @@ def main():
             raise RuntimeError("Worker terminato con errore:\n" + error)
 
         text, _, counters, _ = snapshot(1)
-        assert counters == (1, 1, 1, 0, 0, 1), text
+        assert counters == (0, 1), text
         print(output)
         print(text)
         print("PASS: la deregistrazione ha liberato il waiter.")
