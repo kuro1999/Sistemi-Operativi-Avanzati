@@ -8,9 +8,6 @@ Un amministratore registra nomi di eseguibili, effective UID e numeri di syscall
 poi configura un budget globale `MAX` per finestre di un secondo.
 I thread oltre il limite attendono prima dell'esecuzione della syscall originale.
 
-Questo README è il riferimento unico per architettura, uso e test dello stato
-attuale. La storia delle revisioni rimane consultabile tramite Git.
-
 ## Indice
 
 - [Requisiti e comportamento](#requisiti-e-comportamento)
