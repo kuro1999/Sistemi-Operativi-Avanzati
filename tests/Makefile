@@ -16,6 +16,8 @@ TARGETS := \
 
 all: $(TARGETS)
 
+policy_transition_stress control_ioctl_regression: ../include/uapi/syscall_throttle.h
+
 %: %.c
 >$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(LDLIBS)
 

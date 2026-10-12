@@ -8,8 +8,8 @@ SOURCES := stctl.c
 
 all: $(TARGET)
 
-$(TARGET): $(SOURCES)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^
+$(TARGET): $(SOURCES) ../include/uapi/syscall_throttle.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SOURCES)
 
 clean:
 	rm -f $(TARGET)
