@@ -1,4 +1,4 @@
-ccflags-y += -I$(src)/../include/uapi
+ccflags-y += -I$(src)/../user
 
 obj-m += syscall_throttle.o
 

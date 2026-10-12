@@ -21,7 +21,6 @@ I thread oltre il limite attendono prima dell'esecuzione della syscall originale
 - [Controller](#controller)
 - [Compilazione e demo](#compilazione-e-demo)
 - [Verifiche della demo](#verifiche-della-demo)
-- [Ambiente verificato e limiti](#ambiente-verificato-e-limiti)
 
 ## Requisiti e comportamento
 
@@ -70,12 +69,14 @@ allo stesso criterio; il basename non costituisce una barriera di sicurezza.
 | `module/statistics.c` | Sessioni, integrale dei waiter e peak delay |
 | `module/syscall_hook.c` | Target, filtri Ftrace, wrapper e casi speciali |
 | `module/*.h` | Interfacce interne dei componenti |
-| `include/uapi/syscall_throttle.h` | Tipi e comandi condivisi tra kernel e user-space |
+| `user/syscall_throttle.h` | Tipi e comandi condivisi tra kernel e user-space |
 | `user/stctl.c` | Parsing, ioctl e visualizzazione |
 | `demo/` | Demo automatica C: controller, worker, protocollo e Makefile |
 
 I Makefile si trovano in `module/`, `user/` e `demo/`.
-L'eventuale directory `scripts/` è un segnaposto: non contiene un runner da usare.
+Le tre directory del progetto sono `module/`, `user/` e `demo/`.
+L'header `user/syscall_throttle.h` definisce l'interfaccia condivisa: viene
+incluso dal modulo, dal controller e dalla demo.
 
 ```mermaid
 flowchart TD
@@ -167,7 +168,7 @@ individuali o numero della syscall del peak.
 
 `st_hook_active_calls`, la sua wait queue e i riferimenti al modulo proteggono
 l'esecuzione durante lo scaricamento. I tre contatori diagnostici nonreturning
-sono tuttora usati dal relativo test e non fanno parte dello snapshot UAPI.
+registrano l'attività delle syscall senza ritorno e non fanno parte dello snapshot UAPI.
 
 Le altre strutture UAPI trasportano stato, UID, nomi, numeri, conteggi, MAX e
 richieste LIST con indirizzo user-space, capacità e conteggio restituito.
@@ -244,7 +245,7 @@ originale ancora attiva, per esempio una read su pipe vuota.
 
 Le attese usano `wait_event_interruptible`. Il percorso restituisce il codice
 interno di riavvio previsto; il risultato user-space dipende da syscall, segnale
-e `SA_RESTART`. Sono verificati SIGUSR1, SIGKILL e riavvio della read.
+e `SA_RESTART`.
 
 `exit` e `exit_group` usano record associati al task e il tracepoint
 `sched_process_exit` per rilasciare la protezione quando il wrapper non ritorna.
@@ -278,7 +279,7 @@ istante di osservazione fra COUNT e LIST.
 
 I numeri ioctl 0x00, 0x50 e 0x51 sono ritirati. STATS_GET usa 0x52; il codice
 completo include la dimensione della struttura. Ricompilare modulo, controller
-e test dalla stessa versione dopo modifiche dell'UAPI.
+e demo dalla stessa versione dopo modifiche dell'UAPI.
 
 ## Controller
 
@@ -306,117 +307,37 @@ dalla CLI. Non sono disponibili comandi `ping`, `stats-reset` o selezione FIFO.
 ## Compilazione e demo
 
 Richiesti Linux x86-64 nativo, compilatore C, make, header del kernel in esecuzione,
-`sudo` e `/proc`. Le condizioni del kernel per Ftrace rimangono quelle descritte
-nelle sezioni precedenti. Eseguire in una VM dedicata, senza altre configurazioni
-concorrenti del monitor. I casi EUID selezionano anche eventuali processi dello
-stesso utente: evitare altri carichi durante la prova. Nei casi con UID registrato
-la demo verifica l'attesa del singolo worker tramite `/proc/<pid>/wchan`,
-ricercando `st_rate_limiter_wait_for_change`; non pretende un conteggio globale
-pari a uno. Se il simbolo non e' osservabile, la prova e' inconclusiva.
-I controlli numerici esatti rimangono nei casi isolati per nome di programma.
-
-Da utente normale, nella radice del repository:
+`sudo` e `/proc`. Da utente normale, nella radice del repository, con modulo
+inizialmente scaricato e senza altre prove in parallelo:
 
 ```bash
-make -C module
-make -C user
-make -C demo
-sudo insmod module/syscall_throttle.ko
-sudo timeout --kill-after=10s 120s ./demo/soa_demo
+make -C module && make -C user && make -C demo &&
+sudo insmod module/syscall_throttle.ko &&
+sudo timeout --kill-after=10s 120s ./demo/soa_demo &&
 sudo rmmod syscall_throttle
 ```
 
-Eseguire `rmmod` dopo l'esito positivo; in caso di errore leggere prima il log.
-Il modulo deve inizialmente essere scaricato per usare la sequenza completa.
-Se è già caricato, la demo può essere invocata direttamente solo con monitor
-OFF, MAX=0 e registri vuoti: verifica queste precondizioni e rifiuta una
-configurazione preesistente senza modificarla. Non lanciare la demo in parallelo.
+La demo richiede monitor OFF, MAX=0 e registri vuoti. Usa direttamente le ioctl;
+`user/stctl` è il controller per l'uso manuale. Il Makefile genera `soa_demo` e
+i due eseguibili `demo_worker` e `demo_alt` dallo stesso sorgente `worker.c`.
+I worker vengono avviati automaticamente dalla demo.
 
-La demo usa direttamente le ioctl pubbliche. `user/stctl` resta il controller
-interattivo del progetto. `sudo` deve essere invocato da un utente non-root:
-la demo ricava da `SUDO_UID` l'identità per verificare letture pubbliche, scritture
-vietate e processi non privilegiati. I file devono essere accessibili a tale
-utente. I worker vengono cercati nella directory di `soa_demo`.
-
-Quattro file sorgente/build, tre eseguibili generati:
-
-| File | Responsabilità |
-|---|---|
-| `demo/demo.c` | Configurazione, processi, verifiche e cleanup |
-| `demo/worker.c` | Esegue la syscall richiesta dopo il segnale di avvio |
-| `demo/protocol.h` | Formato dei messaggi tra controller e worker |
-| `demo/Makefile` | Compila `soa_demo`, `demo_worker` e `demo_alt` |
-
-I due worker sono compilati dallo stesso sorgente con nomi diversi, per provare
-la selezione per basename senza duplicare codice. I worker non vanno lanciati
-a mano: ricevono descriptor e parametri dal controller. Il gate usa `recv`,
-così non viene confuso con la `read` scelta come syscall bloccante.
+`PASS` indica il superamento di una verifica; `DEMO SUPERATA` conferma tutte le
+cinque fasi, con monitor OFF, MAX=0 e registri vuoti. `FAIL` indica un errore;
+`INCONCLUSIVO` indica che l'osservazione non è sufficiente per concludere.
+Un timeout non è un esito positivo. La sequenza scarica il modulo solo dopo
+il successo della demo.
 
 ## Verifiche della demo
 
-| Fase | Cosa verifica |
-|---|---|
-| 1. Registri e privilegi | ADD/REMOVE, LIST, duplicati, elementi assenti, capacità insufficiente; letture consentite e modifiche negate al non-root |
-| 2. Selezione e OFF | Solo EUID, solo programma, OR con entrambi, deregistrazione, identità non selezionata, syscall non registrata, bypass OFF |
-| 3. Budget globale | MAX=2 condiviso tra otto processi: due nomi, due EUID e due syscall; sei waiter, rinnovo automatico e MAX invariato |
-| 4. Statistiche | Quattro waiter con MAX=0, integrale temporale esatto in un intervallo stabile, picco, identità del peak, rilascio e congelamento OFF |
-| 5. Syscall bloccante | `read` sospesa dal limiter e poi sulla pipe; consumo e rinnovo del budget per `getpid`; DISABLE termina senza aspettare la read originale |
+Ogni riga descrive una singola fase. Le funzioni che conducono le prove sono in
+[`demo/demo.c`](demo/demo.c); l'ultima colonna indica le principali funzioni del
+modulo coinvolte nelle verifiche.
 
-La fase 3 seleziona soltanto i due nomi, lasciando il registro UID vuoto, per
-isolare il conteggio da processi estranei. La fase 2 verifica separatamente
-la selezione per EUID. I worker sono pronti prima di ENABLE e ricevono il via
-dal controller. La prima finestra viene campionata entro 750 ms da prima di
-ENABLE: la prova richiede almeno 200 ms di osservazione stabile e un campione
-oltre 500 ms. Una VM troppo lenta può produrre un esito inconclusivo.
-
-Nella fase 4, con quattro thread sospesi per tutto l'intervallo, la differenza
-dell'integrale deve essere esattamente quattro volte la differenza del tempo
-di osservazione. La media mostrata è integrale diviso durata della sessione.
-La fase 5 legge `/proc/<pid>/wchan` per distinguere l'attesa della vera `read`
-da quella del limiter; simboli non visibili possono rendere la prova inconclusiva.
-
-Esiti del programma:
-
-- `0`: tutte e cinque le fasi superate; monitor OFF, MAX=0 e registri vuoti.
-- `1`: verifica fallita o interruzione; viene tentato il cleanup.
-- `2`: avvio non valido, utente o device non disponibili.
-- `3`: osservazione inconclusiva per tempi o visibilità di `/proc`; ripetere
-  nella VM senza carico dopo aver controllato lo stato del modulo.
-
-Il wrapper `timeout` può restituire altri codici, per esempio 124 alla scadenza.
-Il cleanup disattiva il monitor, termina e raccoglie i worker residui, rimuove
-le sole registrazioni create dalla demo e imposta MAX=0. Non scarica il modulo.
-Un arresto forzato o un blocco del kernel può impedire il cleanup: un timeout
-non equivale a una prova superata.
-
-La precedente cartella `tests/` è rimossa e resta recuperabile dalla cronologia
-Git. Questa demo mantiene prove automatiche sui comportamenti centrali della
-traccia, ma **non replica tutta la precedente copertura**. In particolare non
-verifica sistematicamente segnali/SA_RESTART, exit/exit_group, scaricamento con
-waiter o syscall attive, autorimozione/delete_module, stress concorrente dei
-registri, variazioni di MAX durante le attese e parsing del controller `stctl`.
-Due syscall non bloccanti e una bloccante sono esempi rappresentativi, non una
-verifica di ogni syscall supportata o di tutti gli interleaving.
-
-## Ambiente verificato e limiti
-
-Le esecuzioni più recenti riportate dall'autore sono su VM Ubuntu x86-64,
-kernel `7.0.0-38-generic`; il test statistiche rileva quattro CPU disponibili.
-Sono riportati 20 esiti positivi tra due esecuzioni più stress da 600 operazioni
-per la rimozione dei contatori diagnostici. La prima prova sul budget globale
-è risultata inconclusiva; la ripetizione è passata. Le modifiche successive a
-controllo device e lookup hanno superato le rispettive regressioni mirate.
-Questi sono esiti storici della suite rimossa, non esiti della nuova demo C.
-La nuova demo deve essere validata nella VM con il modulo caricato.
-
-La copertura è dei casi eseguiti, non di ogni syscall, kernel o interleaving.
-Il percorso supportato è nativo x86-64; compatibilità IA32/x32 e altri kernel
-non sono attestati. Il monitor è globale, non isolato per container.
-
-Restano da approfondire i percorsi d'errore nel teardown Ftrace/tracepoint sul
-kernel esatto di riferimento. Gli errori sono registrati, ma gli esiti ordinari
-di unload non dimostrano che tutti i percorsi eccezionali siano sicuri.
-
-Le scelte da rendere esplicite nella discussione del progetto sono finestre
-fisse, sessioni statistiche al cambio di MAX, identità da basename, eccezione
-per le ioctl amministrative e restrizione dello scaricamento forzato.
+| Fase | Funzione della demo e comportamento verificato | Funzioni principali del modulo e file |
+|---|---|---|
+| 1. Registri e privilegi | `registry_demo()`: aggiunta, consultazione, rimozione e permessi | [`module/device_ioctl.c`](module/device_ioctl.c): `st_device_ioctl_dispatch()`, `st_ioctl_uid_update()`, `st_ioctl_program_update()`, `st_ioctl_syscall_update()` |
+| 2. Selezione e OFF | `matching_demo()`: selezione per programma oppure EUID, deregistrazione e bypass OFF | [`module/syscall_hook.c`](module/syscall_hook.c): `st_syscall_is_relevant()`, `st_syscall_policy_still_matches()`; [`module/device_ioctl.c`](module/device_ioctl.c): `st_ioctl_enable()`, `st_ioctl_disable()` |
+| 3. Budget globale | `budget_demo()`: limite condiviso, sospensione e rinnovo del budget | [`module/rate_limiter.c`](module/rate_limiter.c): `st_rate_limiter_try_acquire()`, `st_rate_limiter_wait_for_change()`, `st_rate_limiter_timer_callback()` |
+| 4. Statistiche | `statistics_demo()`: media temporale, picchi, identità del peak e snapshot OFF | [`module/statistics.c`](module/statistics.c): `st_statistics_account_blocked_time_locked()`, `st_statistics_block_finish()`, `st_statistics_get_snapshot()` |
+| 5. Syscall bloccante | `blocking_demo()`: read su pipe, rinnovo del budget e DISABLE con syscall originale ancora attiva | [`module/syscall_hook.c`](module/syscall_hook.c): `st_generic_syscall_wrapper()`; [`module/device_ioctl.c`](module/device_ioctl.c): `st_ioctl_disable()` |
