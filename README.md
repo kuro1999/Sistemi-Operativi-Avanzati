@@ -73,7 +73,7 @@ allo stesso criterio; il basename non costituisce una barriera di sicurezza.
 | `user/stctl.c` | Parsing, ioctl e visualizzazione |
 | `demo/` | Demo automatica C: controller, worker, protocollo e Makefile |
 
-I Makefile si trovano in `module/`, `user/` e `demo/`.
+Il Makefile nella radice coordina quelli di `module/`, `user/` e `demo/`.
 Le tre directory del progetto sono `module/`, `user/` e `demo/`.
 L'header `user/syscall_throttle.h` definisce l'interfaccia condivisa: viene
 incluso dal modulo, dal controller e dalla demo.
@@ -307,22 +307,43 @@ dalla CLI. Non sono disponibili comandi `ping`, `stats-reset` o selezione FIFO.
 ## Compilazione e demo
 
 Richiesti Linux x86-64 nativo, compilatore C, make, header del kernel in esecuzione,
-`sudo` e `/proc`. Da utente normale, nella radice del repository, con modulo
-inizialmente scaricato e senza altre prove in parallelo:
+`sudo` e `/proc`. Eseguire i comandi dalla radice del repository come utente
+normale, senza `sudo` davanti a `make`.
+
+| Comando | Operazione |
+|---|---|
+| `make` oppure `make load` | Compila modulo e controller, poi carica il modulo se assente |
+| `make build` | Compila soltanto modulo e controller |
+| `make unload` | Compila il controller se necessario, disattiva il monitor e scarica il modulo |
+| `make demo` | Compila tutto, carica il modulo, esegue la demo e lo scarica dopo il successo |
+| `make clean` | Elimina gli artefatti di compilazione delle tre cartelle, senza scaricare il modulo |
+
+Per l'uso manuale:
 
 ```bash
-cd demo
 make
+sudo ./user/stctl max-set 5
+./user/stctl max-get
 ```
 
-`make` compila modulo, controller e demo, chiede la password `sudo` se necessaria,
-carica il modulo, esegue le cinque fasi e scarica il modulo dopo il successo.
-Non crea file di log. Se il modulo è già caricato, si ferma prima di compilare;
-va eseguito come utente normale, senza `sudo` davanti a `make`.
+Un nuovo caricamento lascia il monitor OFF, pronto per registrazioni e
+configurazione. Impostare MAX non attiva il monitor. Se il modulo è già caricato,
+`make` conserva la configurazione e il codice in memoria: per caricare il codice
+ricompilato usare `make unload` seguito da `make`.
 
-`make build` compila tutto senza caricare o eseguire nulla; `make clean` elimina
-solo i tre eseguibili della demo. Se la demo fallisce, il Makefile si interrompe
-e lascia il modulo caricato per consentire l'ispezione del problema.
+Per la demo, con modulo inizialmente scaricato e senza altre prove in parallelo:
+
+```bash
+make demo
+```
+
+Si può anche entrare in `demo/` ed eseguire `make`. In quella cartella,
+`make build` compila modulo, controller e demo senza eseguirli; `make clean`
+elimina solo i tre eseguibili della demo.
+
+Le operazioni privilegiate richiedono la password `sudo` se necessaria. Non
+vengono creati file di log. La demo rifiuta di partire se il modulo è già caricato;
+in caso di errore lascia il modulo caricato per consentire l'ispezione.
 
 La demo richiede monitor OFF, MAX=0 e registri vuoti. Usa direttamente le ioctl;
 `user/stctl` è il controller per l'uso manuale. Il Makefile genera `soa_demo` e
