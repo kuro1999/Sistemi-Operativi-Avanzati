@@ -311,11 +311,18 @@ Richiesti Linux x86-64 nativo, compilatore C, make, header del kernel in esecuzi
 inizialmente scaricato e senza altre prove in parallelo:
 
 ```bash
-make -C module && make -C user && make -C demo &&
-sudo insmod module/syscall_throttle.ko &&
-sudo timeout --kill-after=10s 120s ./demo/soa_demo &&
-sudo rmmod syscall_throttle
+cd demo
+make
 ```
+
+`make` compila modulo, controller e demo, chiede la password `sudo` se necessaria,
+carica il modulo, esegue le cinque fasi e scarica il modulo dopo il successo.
+Non crea file di log. Se il modulo è già caricato, si ferma prima di compilare;
+va eseguito come utente normale, senza `sudo` davanti a `make`.
+
+`make build` compila tutto senza caricare o eseguire nulla; `make clean` elimina
+solo i tre eseguibili della demo. Se la demo fallisce, il Makefile si interrompe
+e lascia il modulo caricato per consentire l'ispezione del problema.
 
 La demo richiede monitor OFF, MAX=0 e registri vuoti. Usa direttamente le ioctl;
 `user/stctl` è il controller per l'uso manuale. Il Makefile genera `soa_demo` e

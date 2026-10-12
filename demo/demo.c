@@ -111,12 +111,17 @@ static struct st_statistics_snapshot snapshot(void)
 static void print_stats(const char *label)
 {
     struct st_statistics_snapshot s = snapshot();
-    printf("  %s: correnti=%u, picco=%u, media=%.6f, osservazione=%.3f s\n",
+    printf("  Statistiche: %s\n"
+           "    Thread attualmente sospesi: %u\n"
+           "    Massimo numero di thread sospesi: %u\n"
+           "    Media temporale dei thread sospesi: %.6f\n"
+           "    Durata di osservazione: %.3f s\n",
            label, s.current_blocked, s.peak_blocked,
            s.observation_ns ? (double)s.blocked_thread_time_ns / s.observation_ns : 0,
            (double)s.observation_ns / NS);
     if (s.peak_valid)
-        printf("  Peak: %.3f ms, programma=%s, EUID=%u\n",
+        printf("    Ritardo massimo nel limiter: %.3f ms\n"
+               "    Programma associato: %s; UID effettivo: %u\n",
                (double)s.peak_delay_ns / 1000000, s.peak_program, s.peak_euid);
 }
 static void wait_current(unsigned int expected)
@@ -247,7 +252,7 @@ static void expect_blocked(struct worker *w)
         wait_worker_blocked(w);
         struct st_statistics_snapshot s = snapshot();
         check(s.current_blocked >= 1, "worker in attesa ma contatore globale nullo");
-        printf("  Worker PID=%ld nel limiter; correnti globali=%u, picco globale=%u.\n",
+        printf("  Processo PID=%ld sospeso nel limiter; thread attualmente sospesi nel limiter=%u, massimo osservato=%u.\n",
                (long)w->pid, s.current_blocked, s.peak_blocked);
         return;
     }
@@ -354,9 +359,13 @@ static void permissions(void)
 }
 static void registry_demo(void)
 {
-    puts("\n[1/5] Registri, consultazione e privilegi");
+    puts("\n[1/5] Registrazione degli elementi e controllo dei permessi");
+    puts("  Registro un UID, un programma e una syscall, poi verifico gli elenchi.");
     uid_change(true); program_change(0,true); syscall_change(0,true);
-    read_lists(); permissions();
+    read_lists();
+    puts("  Controllo che un utente normale possa consultare i dati ma non modificarli.");
+    permissions();
+    puts("  Verifico registrazioni duplicate e rimozioni.");
     struct st_uid_request u={.uid=demo_uid};
     struct st_program_request p={0}; strcpy(p.name,programs[0]);
     struct st_syscall_request s={.number=SYS_getpid};
@@ -365,14 +374,19 @@ static void registry_demo(void)
     uid_change(false); program_change(0,false); syscall_change(0,false);
     expect_error(ST_IOCTL_UID_REMOVE,&u,ENOENT); expect_error(ST_IOCTL_PROGRAM_REMOVE,&p,ENOENT);
     expect_error(ST_IOCTL_SYSCALL_REMOVE,&s,ENOENT);
-    puts("  PASS: liste, ENOSPC, duplicati, rimozioni e tutte le ioctl non-root.");
+    puts("  PASS: registri e permessi funzionano correttamente.");
     reset_case();
 }
 static void matching_demo(void)
 {
-    puts("\n[2/5] Selezione syscall AND (programma OR EUID), deregistrazione e OFF");
-    const char *labels[]={"solo EUID","solo programma","entrambi: OR",
-                          "nessuna identita'","syscall non registrata","monitor OFF"};
+    puts("\n[2/5] Quali chiamate vengono limitate?");
+    puts("  Imposto MAX=0: le chiamate selezionate devono restare sospese.");
+    const char *labels[]={"selezione tramite UID dell'utente",
+                          "selezione tramite nome del programma",
+                          "entrambi registrati: rimuoverne uno deve mantenere il blocco",
+                          "nessuna identita' registrata: la chiamata deve passare",
+                          "syscall non registrata: la chiamata deve passare",
+                          "monitor disattivato: la chiamata deve passare"};
     for (int mode=0;mode<6;mode++) {
         printf("  Caso: %s\n", labels[mode]);
         bool u=mode==0||mode==2||mode==4||mode==5;
@@ -394,10 +408,14 @@ static void matching_demo(void)
         printf("  PASS: %s\n",labels[mode]);
         reset_case();
     }
+    puts("  PASS: selezione, rimozione dei criteri e disattivazione corrette.");
 }
 static void budget_demo(void)
 {
-    puts("\n[3/5] Budget globale: 8 worker, 2 programmi, 2 EUID, 2 syscall; MAX=2");
+    puts("\n[3/5] Un unico limite condiviso tra tutti i processi");
+    puts("  Avvio 8 processi: due programmi, due utenti e due syscall.");
+    puts("  Imposto MAX=2: nella prima finestra devono passare 2 chiamate, mentre le altre 6 attendono.");
+    puts("  Verifico anche che impostare nuovamente MAX=2 non rinnovi il budget.");
     program_change(0,true); program_change(1,true);
     syscall_change(0,true); syscall_change(1,true); set_max(2);
     for (int i=0;i<8;i++) spawn((i/4)%2,(i/2)%2?demo_uid:0,i%2?SYS_getppid:SYS_getpid);
@@ -423,6 +441,7 @@ static void budget_demo(void)
     if (!observed || samples<3 || last_sample<500000000ULL ||
         last_sample-first_sample<200000000ULL)
         fail("VM troppo lenta: campioni insufficienti nella prima finestra",3);
+    puts("  Attendo che le chiamate rimanenti passino nelle finestre successive.");
     for (size_t i=0;i<worker_count;i++) finish(&workers[i]);
     struct st_statistics_snapshot s=snapshot();
     check(!s.current_blocked && s.peak_blocked==6 && s.peak_valid,
@@ -430,12 +449,13 @@ static void budget_demo(void)
     check(s.peak_euid==0 || s.peak_euid==demo_uid,"EUID peak inatteso");
     check(!strcmp(s.peak_program,programs[0])||!strcmp(s.peak_program,programs[1]),"programma peak inatteso");
     check(s.peak_delay_ns>=2*NS && s.peak_delay_ns<=s.observation_ns,"peak fuori sessione");
-    printf("  PASS: 2 ammissioni globali, 6 waiter, %u campioni; tutti i worker completati.\n",samples);
+    printf("  PASS: limite globale rispettato; 2 chiamate ammesse e 6 sospese nella prima finestra (%u campioni).\n  Tutti i processi hanno completato la chiamata.\n",samples);
     print_stats("budget globale"); reset_case();
 }
 static void statistics_demo(void)
 {
-    puts("\n[4/5] Media temporale, picco, identita' del peak e congelamento OFF");
+    puts("\n[4/5] Misurazione delle attese e delle statistiche");
+    puts("  Con MAX=0 sospendo 4 processi e verifico il calcolo della media temporale.");
     program_change(0,true); syscall_change(0,true); set_max(0);
     for (int i=0;i<4;i++) spawn(0,demo_uid,SYS_getpid);
     command(ST_IOCTL_ENABLE,NULL);
@@ -449,26 +469,33 @@ static void statistics_demo(void)
     check(elapsed>0 && b.blocked_thread_time_ns-a.blocked_thread_time_ns==4*elapsed,
           "integrale dei quattro waiter errato");
     for (size_t i=0;i<worker_count;i++) check(!collect(&workers[i],0),"worker passato con MAX=0");
-    print_stats("prima di DISABLE"); command(ST_IOCTL_DISABLE,NULL);
+    print_stats("prima della disattivazione");
+    puts("  Disattivo il monitor: i processi devono ripartire.");
+    command(ST_IOCTL_DISABLE,NULL);
     for (size_t i=0;i<worker_count;i++) finish(&workers[i]);
+    puts("  Controllo il ritardo massimo e il programma e utente associati.");
     a=snapshot();
     check(!a.session_active && !a.current_blocked && a.peak_blocked==4 && a.peak_valid &&
           a.peak_delay_ns>=200000000ULL && a.peak_delay_ns<=a.observation_ns &&
           a.peak_euid==demo_uid && !strcmp(a.peak_program,programs[0]),"peak o chiusura sessione errati");
+    puts("  Verifico che le statistiche restino invariate a monitor disattivato.");
     struct worker *w=spawn(0,demo_uid,SYS_getpid); go(w); finish(w);
     b=snapshot();
     check(!memcmp(&a,&b,sizeof(a)),"snapshot modificato a monitor OFF");
-    print_stats("dopo DISABLE");
-    puts("  PASS: integrale esatto nell'intervallo stabile, picco=4, identita' e snapshot congelato.");
+    print_stats("dopo la disattivazione");
+    puts("  PASS: statistiche coerenti e conservate dopo la disattivazione.");
     reset_case();
 }
 static void blocking_demo(void)
 {
-    puts("\n[5/5] Syscall bloccante: read su pipe e rinnovo del budget");
+    puts("\n[5/5] Una syscall in attesa di dati non deve fermare il sistema di limitazione");
+    puts("  Sospendo una read nel limiter con MAX=0.");
     program_change(0,true); syscall_change(2,true); syscall_change(0,true); set_max(0);
     struct worker *reader=spawn(0,demo_uid,SYS_read);
     struct worker *fast=spawn(0,demo_uid,SYS_getpid);
     command(ST_IOCTL_ENABLE,NULL); go(reader); expect_blocked(reader);
+    puts("  Imposto MAX=1: la read viene ammessa, ma deve attendere dati sulla pipe vuota.");
+    puts("  Verifico il consumo del posto disponibile e il rinnovo del budget per getpid.");
     uint64_t admitted_after=now_ns();
     set_max(1); wait_current(0);
     char path[96],state[128];
@@ -483,22 +510,24 @@ static void blocking_demo(void)
         pause_ms(5);
     }
     check(!collect(reader,0),"read terminata senza dato");
-    puts("  Read originale confermata in attesa sulla pipe.");
+    puts("  Confermato: read ha superato il limiter ed e' in attesa di dati sulla pipe.");
     if (now_ns()-admitted_after>400000000ULL)
         fail("VM troppo lenta per osservare il consumo nella finestra corrente",3);
     go(fast); wait_current(1);
     check(!collect(fast,0),"getpid ammessa nonostante il budget consumato dalla read");
     finish(fast);
     check(!collect(reader,0),"read terminata prima di ricevere il byte");
-    puts("  getpid completata mentre read e' ancora attiva: budget rinnovato.");
-    print_stats("prima del dato");
+    puts("  Confermato: getpid completa al rinnovo del budget, mentre read attende ancora dati.");
+    print_stats("prima dell'invio del dato");
+    puts("  Disattivo il monitor mentre read e' ancora in attesa di dati.");
     command(ST_IOCTL_DISABLE,NULL);
     check(!collect(reader,0),"DISABLE ha completato una read senza dati");
     struct st_statistics_snapshot frozen=snapshot();
+    puts("  Monitor disattivato: invio un byte nella pipe per completare read.");
     check(write(reader->data,"X",1)==1,"scrittura dato"); finish(reader);
     struct st_statistics_snapshot after=snapshot();
     check(!memcmp(&frozen,&after,sizeof(after)),"durata della read inclusa nello snapshot congelato");
-    puts("  PASS: DISABLE non attende la syscall originale; read completata dopo il byte.");
+    puts("  PASS: rinnovo del budget e disattivazione funzionano anche con read attiva.");
     reset_case();
 }
 int main(void)
@@ -530,7 +559,7 @@ int main(void)
     check(!status.enabled && !max.max_invocations && !u.count && !p.count && !s.count,
           "richiesti OFF, MAX=0 e registri vuoti; configurazione preesistente non modificata");
     owned=true;
-    printf("DEMO syscall throttling: EUID worker=%u, controller root.\n",demo_uid);
+    printf("DEMO di limitazione delle syscall: UID dei processi non-root=%u, controllo eseguito come root.\n",demo_uid);
     registry_demo(); matching_demo(); budget_demo(); statistics_demo(); blocking_demo();
     command(ST_IOCTL_GET_STATUS,&status); command(ST_IOCTL_MAX_GET,&max);
     command(ST_IOCTL_UID_GET_COUNT,&u); command(ST_IOCTL_PROGRAM_GET_COUNT,&p);
