@@ -20,7 +20,7 @@ I thread oltre il limite attendono prima dell'esecuzione della syscall originale
 - [Device, permessi e UAPI](#device-permessi-e-uapi)
 - [Controller](#controller)
 - [Compilazione e demo](#compilazione-e-demo)
-- [Test](#test)
+- [Verifiche della demo](#verifiche-della-demo)
 - [Ambiente verificato e limiti](#ambiente-verificato-e-limiti)
 
 ## Requisiti e comportamento
@@ -47,7 +47,7 @@ non il numero delle syscall contemporaneamente in esecuzione.
 | Attivare/disattivare il monitor | ENABLE e DISABLE |
 | Peak delay, programma e UID associati | Snapshot statistico |
 | Numero medio e massimo di thread bloccati | Integrale temporale e picco |
-| Controller e test user-space | `user/` e `tests/` |
+| Controller e test user-space | `user/` e `demo/` |
 
 Il nome selezionato è il **basename dell'eseguibile**, ricavato da `mm->exe_file`.
 Non è `argv[0]` né il nome modificabile del thread. Per i programmi interpretati
@@ -72,9 +72,9 @@ allo stesso criterio; il basename non costituisce una barriera di sicurezza.
 | `module/*.h` | Interfacce interne dei componenti |
 | `include/uapi/syscall_throttle.h` | Tipi e comandi condivisi tra kernel e user-space |
 | `user/stctl.c` | Parsing, ioctl e visualizzazione |
-| `tests/` | Quattro helper C e diciannove regressioni Python |
+| `demo/` | Demo automatica C: controller, worker, protocollo e Makefile |
 
-I Makefile si trovano in `module/`, `user/` e `tests/`.
+I Makefile si trovano in `module/`, `user/` e `demo/`.
 L'eventuale directory `scripts/` è un segnaposto: non contiene un runner da usare.
 
 ```mermaid
@@ -162,7 +162,8 @@ individuali o numero della syscall del peak.
 | `st_nonreturning_call` | Record del task per completare il lifetime di exit/exit_group |
 | `registry_info` | Metadati per consultazione e stampa dei registri nella CLI |
 | `command` | Tabella dei comandi della CLI |
-| `worker_result` | Errori per thread nello stress amministrativo |
+| `worker` (demo) | PID, descriptor e risultato dei processi di prova |
+| `demo_result` (demo) | Messaggi READY/RESULT, esito e tempi della syscall |
 
 `st_hook_active_calls`, la sua wait queue e i riferimenti al modulo proteggono
 l'esecuzione durante lo scaricamento. I tre contatori diagnostici nonreturning
@@ -304,154 +305,98 @@ dalla CLI. Non sono disponibili comandi `ping`, `stats-reset` o selezione FIFO.
 
 ## Compilazione e demo
 
-Servono Linux x86-64, toolchain C/make, header del kernel in esecuzione e Python 3
-per le regressioni. La configurazione del kernel deve permettere i meccanismi
-Ftrace con redirezione, Kprobe e tracepoint utilizzati dal modulo. La presenza
-degli header da sola non garantisce compatibilità o caricamento su ogni kernel.
+Richiesti Linux x86-64 nativo, compilatore C, make, header del kernel in esecuzione,
+`sudo` e `/proc`. Le condizioni del kernel per Ftrace rimangono quelle descritte
+nelle sezioni precedenti. Eseguire in una VM dedicata, senza altre configurazioni
+concorrenti del monitor. I casi EUID selezionano anche eventuali processi dello
+stesso utente: evitare altri carichi durante la prova. Nei casi con UID registrato
+la demo verifica l'attesa del singolo worker tramite `/proc/<pid>/wchan`,
+ricercando `st_rate_limiter_wait_for_change`; non pretende un conteggio globale
+pari a uno. Se il simbolo non e' osservabile, la prova e' inconclusiva.
+I controlli numerici esatti rimangono nei casi isolati per nome di programma.
 
-Dalla radice del repository:
+Da utente normale, nella radice del repository:
 
 ```bash
 make -C module
-make -B -C user
-make -B -C tests
-```
-
-`-B` forza la ricompilazione di controller e helper ed è utile per una verifica
-finale dell'allineamento con l'UAPI. Non carica il modulo e non esegue test.
-
-Demo minima, partendo da modulo scaricato, su VM di sviluppo:
-
-```bash
+make -C user
+make -C demo
 sudo insmod module/syscall_throttle.ko
-sudo ./user/stctl program-add syscall_hook_smoke
-sudo ./user/stctl syscall-add 35
-sudo ./user/stctl max-set 1
-sudo ./user/stctl enable
-./tests/syscall_hook_smoke 20
-./user/stctl stats
-sudo ./user/stctl disable
-sudo ./user/stctl syscall-remove 35
-sudo ./user/stctl program-remove syscall_hook_smoke
+sudo timeout --kill-after=10s 120s ./demo/soa_demo
 sudo rmmod syscall_throttle
 ```
 
-Il worker invoca esplicitamente nanosleep x86-64 (35). Una sola chiamata entro
-il budget può non produrre alcuna attesa; per osservare casi concorrenti usare
-le regressioni dedicate. Per lo scaricamento ordinario usare DISABLE e rmmod;
-non forzare la rimozione in presenza di riferimenti attivi.
+Eseguire `rmmod` dopo l'esito positivo; in caso di errore leggere prima il log.
+Il modulo deve inizialmente essere scaricato per usare la sequenza completa.
+Se è già caricato, la demo può essere invocata direttamente solo con monitor
+OFF, MAX=0 e registri vuoti: verifica queste precondizioni e rifiuta una
+configurazione preesistente senza modificarla. Non lanciare la demo in parallelo.
 
-## Test
+La demo usa direttamente le ioctl pubbliche. `user/stctl` resta il controller
+interattivo del progetto. `sudo` deve essere invocato da un utente non-root:
+la demo ricava da `SUDO_UID` l'identità per verificare letture pubbliche, scritture
+vietate e processi non privilegiati. I file devono essere accessibili a tale
+utente. I worker vengono cercati nella directory di `soa_demo`.
 
-`make -C tests` compila quattro programmi C; non esegue le regressioni Python.
-Alcuni test compilano worker temporanei; `delete_module_regression.py` compila
-anche un piccolo modulo fixture. I test condividono lo stato globale del monitor:
-**eseguirli sequenzialmente**, rispettando privilegi e stato iniziale.
+Quattro file sorgente/build, tre eseguibili generati:
 
-| Test | Verifica |
+| File | Responsabilità |
 |---|---|
-| `statistics_regression.py` | Statistiche e snapshot concorrenti con 1 e 8 worker |
-| `max_session_regression.py` | Trasferimento dei waiter e nuova osservazione su MAX |
-| `max_same_value_regression.py` | MAX identico non restituisce budget consumato |
-| `max_change_regression.py` | Aumento/riduzione conservano consumo e finestra |
-| `disable_regression.py` | Rilascio waiter, bypass OFF, snapshot congelato |
-| `disable_blocking_regression.py` | DISABLE non attende la syscall originale |
-| `deregistration_regression.py` | Rimozione della syscall libera il waiter |
-| `registry_concurrency_regression.py` | Aggiornamenti concorrenti programmi/syscall |
-| `identity_deregistration_regression.py` | Matching programma/UID e semantica OR |
-| `signal_regression.py` | Interruzione con SIGUSR1 e SIGKILL |
-| `restart_regression.py` | SA_RESTART durante l'attesa del limiter |
-| `admitted_signal_regression.py` | Segnale durante la syscall già ammessa |
-| `blocking_syscall_regression.py` | Syscall bloccante e rinnovo del budget |
-| `global_budget_regression.py` | Budget condiviso fra 16 worker con MAX=3 |
-| `control_ioctl_regression` (C) | Bypass, descriptor duplicato, privilegi e comandi estranei |
-| `nonreturning_regression.py` | exit, exit_group, diagnostica e unload |
-| `unload_waiters_regression.py` | Scaricamento con waiter nel limiter |
-| `unload_active_regression.py` | Scaricamento con syscall originale ancora attiva |
-| `delete_module_regression.py` | Rimozione bersaglio, autorimozione protetta e pin |
-| `delete_module_edges_regression.py` | Richiesta forzata, identità esclusa e segnali |
-| `policy_transition_stress` (C) | 600 operazioni amministrative concorrenti |
+| `demo/demo.c` | Configurazione, processi, verifiche e cleanup |
+| `demo/worker.c` | Esegue la syscall richiesta dopo il segnale di avvio |
+| `demo/protocol.h` | Formato dei messaggi tra controller e worker |
+| `demo/Makefile` | Compila `soa_demo`, `demo_worker` e `demo_alt` |
 
-Gli altri helper C sono `syscall_hook_smoke` e `syscall_hook_signal`.
-Lo stress amministrativo non crea worker di throttling: al successo lascia OFF
-e MAX=7. Non preserva una configurazione preesistente; usarlo soltanto nello
-stato di prova pulito indicato qui.
+I due worker sono compilati dallo stesso sorgente con nomi diversi, per provare
+la selezione per basename senza duplicare codice. I worker non vanno lanciati
+a mano: ricevono descriptor e parametri dal controller. Il gate usa `recv`,
+così non viene confuso con la `read` scelta come syscall bloccante.
 
-### Sequenza completa
+## Verifiche della demo
 
-Eseguire come utente normale dalla radice, dopo la compilazione e con modulo
-inizialmente scaricato. Il blocco interrompe la sequenza al primo errore.
-Non esegue recuperi automatici né ripetizioni di test inconclusivi.
+| Fase | Cosa verifica |
+|---|---|
+| 1. Registri e privilegi | ADD/REMOVE, LIST, duplicati, elementi assenti, capacità insufficiente; letture consentite e modifiche negate al non-root |
+| 2. Selezione e OFF | Solo EUID, solo programma, OR con entrambi, deregistrazione, identità non selezionata, syscall non registrata, bypass OFF |
+| 3. Budget globale | MAX=2 condiviso tra otto processi: due nomi, due EUID e due syscall; sei waiter, rinnovo automatico e MAX invariato |
+| 4. Statistiche | Quattro waiter con MAX=0, integrale temporale esatto in un intervallo stabile, picco, identità del peak, rilascio e congelamento OFF |
+| 5. Syscall bloccante | `read` sospesa dal limiter e poi sulla pipe; consumo e rinnovo del budget per `getpid`; DISABLE termina senza aspettare la read originale |
 
-```bash
-bash <<'BASH'
-set -Eeuo pipefail
-if (( EUID == 0 )); then
-    echo 'Eseguire da utente normale.'
-    exit 1
-fi
-if [[ -d /sys/module/syscall_throttle ]]; then
-    echo 'Richiesto modulo inizialmente scaricato.'
-    exit 1
-fi
-log="$HOME/syscall-throttle-suite-$(date +%Y%m%d-%H%M%S).log"
-exec > >(tee "$log") 2>&1
-step=Preparazione
-trap 'rc=$?; trap - ERR; printf "\nInterrotto: %s (codice %s)\nLog: %s\n" "$step" "$rc" "$log"; exit "$rc"' ERR
-export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-run() { step="$*"; printf '\n========== %s ==========\n' "$step"; "$@"; }
-normal_test() {
-    sudo -v
-    run timeout --kill-after=10s 240s python3 "tests/$1.py"
-}
-root_test() {
-    sudo -v
-    run sudo -n env PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
-        timeout --kill-after=10s 240s python3 "tests/$1.py"
-}
-load_module() { sudo -v; run sudo -n insmod module/syscall_throttle.ko; }
-run uname -r
-run git rev-parse HEAD
-run git status --short
-load_module
-for test in statistics_regression max_session_regression \
-    max_same_value_regression max_change_regression disable_regression \
-    disable_blocking_regression deregistration_regression \
-    registry_concurrency_regression signal_regression restart_regression \
-    admitted_signal_regression blocking_syscall_regression; do
-    normal_test "$test"
-done
-root_test global_budget_regression
-root_test identity_deregistration_regression
-sudo -v
-run sudo -n timeout --kill-after=10s 240s ./tests/control_ioctl_regression
-run sudo -n timeout --kill-after=10s 240s ./tests/policy_transition_stress
-run sudo -n ./user/stctl max-set 0
-normal_test nonreturning_regression
-load_module
-normal_test unload_waiters_regression
-load_module
-normal_test unload_active_regression
-root_test delete_module_regression
-root_test delete_module_edges_regression
-if [[ -d /sys/module/syscall_throttle ]]; then
-    echo 'Stato finale inatteso: modulo ancora caricato.'
-    exit 1
-fi
-printf '\n20 regressioni e stress superati; modulo scaricato.\nLog: %s\n' "$log"
-BASH
-```
+La fase 3 seleziona soltanto i due nomi, lasciando il registro UID vuoto, per
+isolare il conteggio da processi estranei. La fase 2 verifica separatamente
+la selezione per EUID. I worker sono pronti prima di ENABLE e ricevono il via
+dal controller. La prima finestra viene campionata entro 750 ms da prima di
+ENABLE: la prova richiede almeno 200 ms di osservazione stabile e un campione
+oltre 500 ms. Una VM troppo lenta può produrre un esito inconclusivo.
 
-I primi test richiedono modulo caricato, OFF e registri vuoti; il caricamento
-iniziale li assicura. `nonreturning`, `unload_waiters` e `unload_active` scaricano
-il modulo al successo, quindi ciascun caso successivo necessita del caricamento.
-I due test `delete_module*` gestiscono autonomamente caricamento e scaricamento.
+Nella fase 4, con quattro thread sospesi per tutto l'intervallo, la differenza
+dell'integrale deve essere esattamente quattro volte la differenza del tempo
+di osservazione. La media mostrata è integrale diviso durata della sessione.
+La fase 5 legge `/proc/<pid>/wchan` per distinguere l'attesa della vera `read`
+da quella del limiter; simboli non visibili possono rendere la prova inconclusiva.
 
-PASS significa che sono passate le asserzioni del caso. FAIL indica un errore
-rilevato. INCONCLUSIVO/INCONCLUDENTE indica che le precondizioni temporali non
-hanno consentito la misura, e **non equivale a PASS**. Dopo errori o timeout
-controllare output, `dmesg` e stato del modulo prima di proseguire; non ripetere
-ciecamente rmmod se una chiamata originale è ancora attiva.
+Esiti del programma:
+
+- `0`: tutte e cinque le fasi superate; monitor OFF, MAX=0 e registri vuoti.
+- `1`: verifica fallita o interruzione; viene tentato il cleanup.
+- `2`: avvio non valido, utente o device non disponibili.
+- `3`: osservazione inconclusiva per tempi o visibilità di `/proc`; ripetere
+  nella VM senza carico dopo aver controllato lo stato del modulo.
+
+Il wrapper `timeout` può restituire altri codici, per esempio 124 alla scadenza.
+Il cleanup disattiva il monitor, termina e raccoglie i worker residui, rimuove
+le sole registrazioni create dalla demo e imposta MAX=0. Non scarica il modulo.
+Un arresto forzato o un blocco del kernel può impedire il cleanup: un timeout
+non equivale a una prova superata.
+
+La precedente cartella `tests/` è rimossa e resta recuperabile dalla cronologia
+Git. Questa demo mantiene prove automatiche sui comportamenti centrali della
+traccia, ma **non replica tutta la precedente copertura**. In particolare non
+verifica sistematicamente segnali/SA_RESTART, exit/exit_group, scaricamento con
+waiter o syscall attive, autorimozione/delete_module, stress concorrente dei
+registri, variazioni di MAX durante le attese e parsing del controller `stctl`.
+Due syscall non bloccanti e una bloccante sono esempi rappresentativi, non una
+verifica di ogni syscall supportata o di tutti gli interleaving.
 
 ## Ambiente verificato e limiti
 
@@ -461,7 +406,8 @@ Sono riportati 20 esiti positivi tra due esecuzioni più stress da 600 operazion
 per la rimozione dei contatori diagnostici. La prima prova sul budget globale
 è risultata inconclusiva; la ripetizione è passata. Le modifiche successive a
 controllo device e lookup hanno superato le rispettive regressioni mirate.
-Non si presenta questo insieme come un'unica suite completa sull'ultimo commit.
+Questi sono esiti storici della suite rimossa, non esiti della nuova demo C.
+La nuova demo deve essere validata nella VM con il modulo caricato.
 
 La copertura è dei casi eseguiti, non di ogni syscall, kernel o interleaving.
 Il percorso supportato è nativo x86-64; compatibilità IA32/x32 e altri kernel

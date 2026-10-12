@@ -35,11 +35,12 @@ core.*
 compile_commands.json
 
 /user/stctl
-/tests/policy_transition_stress
-/tests/syscall_hook_smoke
-/tests/syscall_hook_signal
 
-# Generated Python caches and test executable
+# Generated Python caches
 __pycache__/
 *.py[cod]
-/tests/control_ioctl_regression
+
+# C demo executables
+/demo/soa_demo
+/demo/demo_worker
+/demo/demo_alt
