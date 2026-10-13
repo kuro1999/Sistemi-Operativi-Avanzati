@@ -27,18 +27,13 @@ struct st_rate_limiter_state {
 
 static struct st_rate_limiter_state st_rate_limiter;
 
-static void
-st_rate_limiter_timer_callback(struct timer_list *timer)
-{
+static void st_rate_limiter_timer_callback(struct timer_list *timer){
     struct st_rate_limiter_state *state;
     bool wake_waiters = false;
 
     state = timer_container_of(state, timer, window_timer);
-
-    /*
-     * La callback viene eseguita in softirq context.
-     * Non è quindi necessario usare spin_lock_bh() qui.
-     */
+    
+    // La callback viene eseguita in softirq context.
     spin_lock(&state->lock);
 
     if (state->running && !state->stopping) {
@@ -46,9 +41,9 @@ st_rate_limiter_timer_callback(struct timer_list *timer)
         state->generation++;
 
         /*
-         * Manteniamo la cadenza rispetto alla scadenza precedente,
-         * evitando però di riarmare il timer nel passato qualora
-         * la callback sia stata eseguita con forte ritardo.
+         * Calcoliamo la prossima scadenza a pritire da quella precedente,
+         * se la callback viene eseguira inritardo, saltiamo le scadenze
+         * trascorse fino alla prossima.
          */
         state->next_expiry += HZ;
 
@@ -72,14 +67,11 @@ st_rate_limiter_timer_callback(struct timer_list *timer)
         wake_up_all(&state->wait_queue);
 }
 
-void st_rate_limiter_init(void)
-{
+void st_rate_limiter_init(void){
     spin_lock_init(&st_rate_limiter.lock);
     init_waitqueue_head(&st_rate_limiter.wait_queue);
 
-    timer_setup(&st_rate_limiter.window_timer,
-                st_rate_limiter_timer_callback,
-                0);
+    timer_setup(&st_rate_limiter.window_timer, st_rate_limiter_timer_callback, 0);
 
     st_rate_limiter.max_invocations = 0U;
     st_rate_limiter.admitted = 0U;
@@ -91,8 +83,7 @@ void st_rate_limiter_init(void)
     pr_info("syscall_throttle: rate limiter inizializzato, MAX=0\n");
 }
 
-int st_rate_limiter_start(void)
-{
+int st_rate_limiter_start(void){
     bool started = false;
     int ret = 0;
 
@@ -106,8 +97,7 @@ int st_rate_limiter_start(void)
         st_rate_limiter.next_expiry = jiffies + HZ;
         st_rate_limiter.running = true;
 
-        mod_timer(&st_rate_limiter.window_timer,
-                  st_rate_limiter.next_expiry);
+        mod_timer(&st_rate_limiter.window_timer, st_rate_limiter.next_expiry);
 
         started = true;
     }
@@ -124,13 +114,12 @@ int st_rate_limiter_start(void)
     return ret;
 }
 
-void st_rate_limiter_stop(void)
-{
+void st_rate_limiter_stop(void){
     bool stopped = false;
 
     /*
      * Rendiamo prima invisibile lo stato running alla callback.
-     * Una callback già avviata potrà terminare, ma non riarmare
+     * Una callback già avviata potrà terminare, ma non reimpostare
      * nuovamente il timer dopo aver osservato running == false.
      */
     spin_lock_bh(&st_rate_limiter.lock);
@@ -160,8 +149,8 @@ void st_rate_limiter_stop(void)
         pr_info("syscall_throttle: rate limiter arrestato\n");
 }
 
-u64 st_rate_limiter_get_generation(void)
-{
+u64 st_rate_limiter_get_generation(void){
+
     u64 generation;
     spin_lock_bh(&st_rate_limiter.lock);
     generation = st_rate_limiter.generation;
@@ -169,20 +158,15 @@ u64 st_rate_limiter_get_generation(void)
     return generation;
 }
 
-void st_rate_limiter_policy_changed(void)
-{
+void st_rate_limiter_policy_changed(void){
+
     spin_lock_bh(&st_rate_limiter.lock);
     st_rate_limiter.generation++;
     spin_unlock_bh(&st_rate_limiter.lock);
     wake_up_all(&st_rate_limiter.wait_queue);
 }
 
-enum st_rate_limiter_decision
-st_rate_limiter_try_acquire(
-    u64 expected_generation,
-    u64 *window_generation,
-    u64 *throttle_start_ns)
-{
+enum st_rate_limiter_decision st_rate_limiter_try_acquire(u64 expected_generation, u64 *window_generation, u64 *throttle_start_ns){
     enum st_rate_limiter_decision decision;
 
     /*
@@ -245,9 +229,7 @@ st_rate_limiter_try_acquire(
  * Acquisiamo lo stesso lock usato dagli aggiornamenti per evitare
  * letture incoerenti tra generation, running e stopping.
  */
-static bool st_rate_limiter_state_changed(
-    u64 observed_generation)
-{
+static bool st_rate_limiter_state_changed(u64 observed_generation){
     bool changed;
 
     spin_lock_bh(&st_rate_limiter.lock);
@@ -262,9 +244,7 @@ static bool st_rate_limiter_state_changed(
     return changed;
 }
 
-int st_rate_limiter_wait_for_change(
-    u64 observed_generation)
-{
+int st_rate_limiter_wait_for_change(u64 observed_generation){
     /*
      * wait_event_interruptible() evita la lost wake-up race:
      *
@@ -275,14 +255,10 @@ int st_rate_limiter_wait_for_change(
      *
      * Un segnale pendente interrompe l'attesa con -ERESTARTSYS.
      */
-    return wait_event_interruptible(
-        st_rate_limiter.wait_queue,
-        st_rate_limiter_state_changed(
-            observed_generation));
+    return wait_event_interruptible(st_rate_limiter.wait_queue, st_rate_limiter_state_changed(observed_generation));
 }
 
-void st_rate_limiter_set_max(u64 max_invocations)
-{
+void st_rate_limiter_set_max(u64 max_invocations){
     bool changed = false;
 
     spin_lock_bh(&st_rate_limiter.lock);
@@ -307,23 +283,17 @@ void st_rate_limiter_set_max(u64 max_invocations)
         wake_up_all(&st_rate_limiter.wait_queue);
 }
 
-u64 st_rate_limiter_get_max(void)
-{
+u64 st_rate_limiter_get_max(void){
     u64 max_invocations;
-
     spin_lock_bh(&st_rate_limiter.lock);
-
     max_invocations = st_rate_limiter.max_invocations;
-
     spin_unlock_bh(&st_rate_limiter.lock);
-
     return max_invocations;
 }
 
-void st_rate_limiter_exit(void)
-{
+void st_rate_limiter_exit(void){
     /*
-     * Impediamo alla callback di riarmare il timer e rendiamo
+     * Impediamo alla callback di reimpostare il timer e rendiamo
      * visibile ai futuri waiter che il componente è in teardown.
      */
     spin_lock_bh(&st_rate_limiter.lock);

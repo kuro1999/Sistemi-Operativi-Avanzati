@@ -43,34 +43,6 @@ static DEFINE_SPINLOCK(st_statistics_lock);
 static struct st_statistics_state st_statistics;
 static DECLARE_WAIT_QUEUE_HEAD(st_statistics_drain_queue);
 
-static u64 st_statistics_saturating_add(u64 left, u64 right)
-{
-    u64 result;
-
-    if (check_add_overflow(left, right, &result))
-        return U64_MAX;
-    return result;
-}
-
-static u64 st_statistics_saturating_multiply(u64 value, u32 multiplier)
-{
-    u64 result;
-
-    if (check_mul_overflow(value, (u64)multiplier, &result)) {
-        return U64_MAX;
-    }
-    return result;
-}
-
-/* Generazione non nulla; il wrap-around richiederebbe 2^64 nuove sessioni. */
-static u64 st_statistics_next_generation(u64 generation)
-{
-    generation++;
-    if (generation == 0U)
-        generation = 1U;
-    return generation;
-}
-
 /* Richiede st_statistics_lock. */
 static void st_statistics_account_blocked_time_locked(u64 now_ns)
 {
@@ -83,9 +55,11 @@ static void st_statistics_account_blocked_time_locked(u64 now_ns)
         return;
     }
     elapsed_ns = now_ns - st_statistics.last_blocked_change_ns;
-    weighted_ns = st_statistics_saturating_multiply(elapsed_ns, st_statistics.current_blocked);
-    st_statistics.blocked_thread_time_ns =
-        st_statistics_saturating_add(st_statistics.blocked_thread_time_ns, weighted_ns);
+    if (check_mul_overflow(elapsed_ns, (u64)st_statistics.current_blocked, &weighted_ns))
+        weighted_ns = U64_MAX;
+    if (check_add_overflow(st_statistics.blocked_thread_time_ns, weighted_ns,
+                          &st_statistics.blocked_thread_time_ns))
+        st_statistics.blocked_thread_time_ns = U64_MAX;
     st_statistics.last_blocked_change_ns = now_ns;
 }
 
@@ -95,7 +69,10 @@ static void st_statistics_reset_session_locked(u64 now_ns, bool session_active)
 {
     u64 next_generation;
 
-    next_generation = st_statistics_next_generation(st_statistics.generation);
+    /* Generazione non nulla anche in caso di wrap-around. */
+    next_generation = st_statistics.generation + 1U;
+    if (next_generation == 0U)
+        next_generation = 1U;
     memset(&st_statistics, 0, sizeof(st_statistics));
     st_statistics.generation = next_generation;
     st_statistics.continuity_generation = next_generation;

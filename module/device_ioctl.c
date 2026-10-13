@@ -202,10 +202,6 @@ static long st_ioctl_list_reply(unsigned long argument, void *request, size_t re
     *count = required;
     if (capacity < required)
         goto reply;
-    ret = 0;
-    /* Solo UID esegue lo snapshot anche con conteggio iniziale zero. */
-    if (!required && kind != ST_LIST_UID)
-        goto reply;
     if (required) {
         items = kcalloc(required, item_size, GFP_KERNEL);
         if (!items)

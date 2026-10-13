@@ -21,13 +21,13 @@ bool st_device_try_control_ioctl(unsigned int fd, unsigned int command,
     struct file *file;
     long ret;
 
-    if (!result || !st_device_is_control_command(command))
+    if (!result || !st_device_is_control_command(command)) //comando riconosciuto?
         return false;
 
     file = fget(fd);
     if (!file)
         return false;
-    if (file->f_op != &st_file_operations) {
+    if (file->f_op != &st_file_operations) { //indirizzato al nostro device?
         fput(file);
         return false;
     }
