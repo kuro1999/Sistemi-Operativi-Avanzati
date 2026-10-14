@@ -1,14 +1,17 @@
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
 #include "protocol.h"
 
-_Static_assert(SYS_read == 0 && SYS_getpid == 39 && SYS_getppid == 110,
+_Static_assert(SYS_read == 0 && SYS_getpid == 39 && SYS_getppid == 110 &&
+               SYS_exit == 60 && SYS_exit_group == 231 && SYS_delete_module == 176,
                "La demo richiede l'ABI nativa x86-64");
 static uint64_t now_ns(void)
 {
@@ -30,10 +33,19 @@ static void send_result(int fd, const struct demo_result *r)
 }
 int main(int argc, char **argv)
 {
-    if (argc != 5) return 2;
+    if (argc != 5 && argc != 6) return 2;
     int gate = atoi(argv[1]), output = atoi(argv[2]);
     int number = atoi(argv[3]), data = atoi(argv[4]);
-    if (number != SYS_getpid && number != SYS_getppid && number != SYS_read)
+    int force = argc == 6 && strcmp(argv[5], "force") == 0;
+    if (argc == 6 && (!force || number != SYS_delete_module)) return 2;
+    if (force) {
+        /* Anche se l'hook manca, non tentiamo una rimozione forzata reale. */
+        errno = 0;
+        if (access("/sys/module/" DEMO_ABSENT_MODULE, F_OK) == 0 || errno != ENOENT)
+            return 2;
+    }
+    if (number != SYS_getpid && number != SYS_getppid && number != SYS_read &&
+        number != SYS_exit && number != SYS_exit_group && number != SYS_delete_module)
         return 2;
     struct demo_result r = {.kind = DEMO_READY, .euid = (uint32_t)geteuid()};
     send_result(output, &r);
@@ -43,11 +55,24 @@ int main(int argc, char **argv)
     r.kind = DEMO_RESULT;
     r.start_ns = now_ns();
     errno = 0;
-    r.value = number == SYS_read ? syscall(SYS_read, data, &byte, 1)
-                                 : syscall(number);
+    if (number == SYS_exit || number == SYS_exit_group) {
+        syscall(number, DEMO_EXIT_STATUS);
+        /* Un ritorno e' un errore: il padre riconosce uno stato diverso da 42. */
+        _exit(92);
+    }
+    if (number == SYS_delete_module) {
+        const char *target = force ? DEMO_ABSENT_MODULE : "syscall_throttle";
+        r.value = syscall(SYS_delete_module, target,
+                          O_NONBLOCK | (force ? O_TRUNC : 0));
+    } else {
+        r.value = number == SYS_read ? syscall(SYS_read, data, &byte, 1)
+                                     : syscall(number);
+    }
     r.error = r.value < 0 ? errno : 0;
     r.end_ns = now_ns();
     send_result(output, &r);
+    /* Il padre controlla l'errno atteso di delete_module. */
+    if (number == SYS_delete_module) return 0;
     if (r.error || (number == SYS_read && (r.value != 1 || byte != 'X')))
         return 4;
     return 0;

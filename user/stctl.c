@@ -10,9 +10,8 @@
 
 #include <syscall_throttle.h>
 
-/* Mantiene testo, stream e codice di uscita dei messaggi originali. */
-static int fail(const char *format, ...)
-{
+/* Stampa un errore su stderr e restituisce il codice di uscita 1. */
+static int fail(const char *format, ...){
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
@@ -20,13 +19,11 @@ static int fail(const char *format, ...)
     return 1;
 }
 
-static int ioctl_failed(const char *name)
-{
+static int ioctl_failed(const char *name){
     return fail("ioctl %s fallita: %s\n", name, strerror(errno));
 }
 
-static int parse_decimal(const char *text, uint64_t limit, uint64_t *out)
-{
+static int parse_decimal(const char *text, uint64_t limit, uint64_t *out){
     char *end;
     unsigned long long value;
 
@@ -47,8 +44,7 @@ static int parse_decimal(const char *text, uint64_t limit, uint64_t *out)
     return 0;
 }
 
-static int execute_status(int fd)
-{
+static int execute_status(int fd){
     struct st_monitor_status status = {0};
 
     if (ioctl(fd, ST_IOCTL_GET_STATUS, &status) == -1)
@@ -59,8 +55,7 @@ static int execute_status(int fd)
     return 0;
 }
 
-static int execute_enable(int fd)
-{
+static int execute_enable(int fd){
     if (ioctl(fd, ST_IOCTL_ENABLE) == -1)
         return ioctl_failed("ST_IOCTL_ENABLE");
 
@@ -68,8 +63,7 @@ static int execute_enable(int fd)
     return 0;
 }
 
-static int execute_disable(int fd)
-{
+static int execute_disable(int fd){
     if (ioctl(fd, ST_IOCTL_DISABLE) == -1)
         return ioctl_failed("ST_IOCTL_DISABLE");
 
@@ -77,8 +71,7 @@ static int execute_disable(int fd)
     return 0;
 }
 
-static int execute_uid_update(int fd, __u32 uid, int add)
-{
+static int execute_uid_update(int fd, __u32 uid, int add){
     struct st_uid_request request = {.uid = uid};
     unsigned long command = add ? ST_IOCTL_UID_ADD : ST_IOCTL_UID_REMOVE;
 
@@ -98,14 +91,12 @@ static int execute_uid_update(int fd, __u32 uid, int add)
     return 0;
 }
 
-static int validate_program_name(const char *name)
-{
+static int validate_program_name(const char *name){
     /* argv contiene stringhe terminate da NUL; accettiamo solo basename. */
     return name && name[0] && strlen(name) <= ST_PROGRAM_NAME_MAX && !strchr(name, '/') ? 0 : -1;
 }
 
-static int execute_program_update(int fd, const char *name, int add)
-{
+static int execute_program_update(int fd, const char *name, int add){
     struct st_program_request request = {0};
     unsigned long command = add ? ST_IOCTL_PROGRAM_ADD : ST_IOCTL_PROGRAM_REMOVE;
 
@@ -126,8 +117,7 @@ static int execute_program_update(int fd, const char *name, int add)
     return 0;
 }
 
-static int execute_max_set(int fd, uint64_t max_invocations)
-{
+static int execute_max_set(int fd, uint64_t max_invocations){
     struct st_max_config request = {.max_invocations = (__u64)max_invocations};
 
     if (ioctl(fd, ST_IOCTL_MAX_SET, &request) == -1) {
@@ -149,8 +139,7 @@ static int execute_max_set(int fd, uint64_t max_invocations)
     return 0;
 }
 
-static int execute_max_get(int fd)
-{
+static int execute_max_get(int fd){
     struct st_max_config response = {0};
 
     if (ioctl(fd, ST_IOCTL_MAX_GET, &response) == -1)
@@ -162,8 +151,7 @@ static int execute_max_get(int fd)
     return 0;
 }
 
-static int execute_statistics_get(int fd)
-{
+static int execute_statistics_get(int fd){
     struct st_statistics_snapshot snapshot = {0};
     double average_blocked;
 
@@ -207,33 +195,16 @@ static int execute_statistics_get(int fd)
 enum registry { REG_UID, REG_PROGRAM, REG_SYSCALL };
 
 static const struct registry_info {
-    const char *ioctl_name, *title, *empty, *allocation_error;
-    const char *count_error, *growth_error, *unstable_error;
+    const char *ioctl_name, *title;
     size_t item_size;
 } registries[] = {
-    { "UID", "UID registrati", "nessuno",
-      "Impossibile allocare memoria per %u UID.\n",
-      "Risposta UID_LIST non valida ricevuta dal driver.\n",
-      "Il driver ha restituito una capacità UID_LIST non valida.\n",
-      "Impossibile ottenere la lista: il registro UID è stato modificato ripetutamente.\n",
-      sizeof(__u32) },
-    { "PROGRAM", "Programmi registrati", "nessuno",
-      "Memoria insufficiente per la lista dei programmi.\n",
-      "Risposta PROGRAM_LIST non valida: conteggio superiore alla capacità.\n",
-      "Risposta PROGRAM_LIST non valida dopo ENOSPC.\n",
-      "Il registro programmi è cambiato troppe volte durante la consultazione.\n",
-      sizeof(struct st_program_name) },
-    { "SYSCALL", "System call registrate", "nessuna",
-      "Memoria insufficiente per la lista delle system call.\n",
-      "Risposta SYSCALL_LIST non valida: count supera la capacità.\n",
-      "Risposta SYSCALL_LIST non valida: capacità richiesta non crescente.\n",
-      "Impossibile ottenere una lista stabile delle system call dopo più tentativi.\n",
-      sizeof(__u32) },
+    { "UID", "UID registrati", sizeof(__u32) },
+    { "PROGRAM", "Programmi registrati", sizeof(struct st_program_name) },
+    { "SYSCALL", "System call registrate", sizeof(__u32) },
 };
 
 /* Ogni ioctl usa il proprio tipo UAPI: nessun cast tra strutture diverse. */
-static int read_count(int fd, enum registry kind, __u32 *count)
-{
+static int read_count(int fd, enum registry kind, __u32 *count){
     int result;
 
     if (kind == REG_UID) {
@@ -255,9 +226,7 @@ static int read_count(int fd, enum registry kind, __u32 *count)
     return 0;
 }
 
-static int read_list(int fd, enum registry kind, void *items, __u32 capacity,
-                     __u32 *count)
-{
+static int read_list(int fd, enum registry kind, void *items, __u32 capacity, __u32 *count){
     __u64 pointer = (__u64)(uintptr_t)items;
     int result;
 
@@ -277,8 +246,7 @@ static int read_list(int fd, enum registry kind, void *items, __u32 capacity,
     return result;
 }
 
-static int print_list(enum registry kind, const void *items, __u32 count)
-{
+static int print_list(enum registry kind, const void *items, __u32 count){
     const struct st_program_name *programs = items;
     const __u32 *numbers = items;
 
@@ -289,7 +257,7 @@ static int print_list(enum registry kind, const void *items, __u32 count)
     }
     printf("%s: %u\n", registries[kind].title, count);
     if (!count)
-        printf("  %s\n", registries[kind].empty);
+        printf("  (vuoto)\n");
     for (__u32 i = 0; i < count; i++) {
         if (kind == REG_PROGRAM) {
             if (!memchr(programs[i].name, '\0', sizeof(programs[i].name)))
@@ -302,8 +270,7 @@ static int print_list(enum registry kind, const void *items, __u32 count)
     return 0;
 }
 
-static int execute_registry(int fd, enum registry kind, int list)
-{
+static int execute_registry(int fd, enum registry kind, int list){
     const struct registry_info *info = &registries[kind];
     __u32 capacity;
 
@@ -324,11 +291,11 @@ static int execute_registry(int fd, enum registry kind, int list)
         int result, saved_errno;
 
         if (capacity && !items)
-            return fail(info->allocation_error, capacity);
+            return fail("%s: memoria insufficiente.\n", info->ioctl_name);
         result = read_list(fd, kind, items, capacity, &count);
         saved_errno = errno;
         if (result == 0) {
-            result = count > capacity ? fail("%s", info->count_error)
+            result = count > capacity ? fail("%s: conteggio ricevuto non valido.\n", info->ioctl_name)
                                       : print_list(kind, items, count);
             free(items);
             return result;
@@ -338,14 +305,13 @@ static int execute_registry(int fd, enum registry kind, int list)
             return fail("ioctl ST_IOCTL_%s_LIST fallita: %s\n",
                         info->ioctl_name, strerror(saved_errno));
         if (count <= capacity)
-            return fail("%s", info->growth_error);
+            return fail("%s: capacità richiesta non valida.\n", info->ioctl_name);
         capacity = count;
     }
-    return fail("%s", info->unstable_error);
+    return fail("%s: registro modificato troppe volte; riprovare.\n", info->ioctl_name);
 }
 
-static int execute_syscall_update(int fd, __u32 number, int add)
-{
+static int execute_syscall_update(int fd, __u32 number, int add){
     struct st_syscall_request request = {.number = number};
     unsigned long command = add ? ST_IOCTL_SYSCALL_ADD : ST_IOCTL_SYSCALL_REMOVE;
 
@@ -399,24 +365,21 @@ static const struct command {
     {"stats",          NULL,       OP_SIMPLE,  0,           execute_statistics_get},
 };
 
-static void print_usage(const char *program_name)
-{
+static void print_usage(const char *program_name){
     fprintf(stderr, "Uso:\n");
     for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
         fprintf(stderr, "  %s %s%s%s\n", program_name, commands[i].name,
                 commands[i].argument ? " " : "", commands[i].argument ? commands[i].argument : "");
 }
 
-static const struct command *find_command(const char *name)
-{
+static const struct command *find_command(const char *name){
     for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
         if (strcmp(name, commands[i].name) == 0)
             return &commands[i];
     return NULL;
 }
 
-static int execute_command(int fd, const struct command *command, const char *text, uint64_t value)
-{
+static int execute_command(int fd, const struct command *command, const char *text, uint64_t value){
     switch (command->operation) {
     case OP_SIMPLE:
         return command->execute(fd);
@@ -435,8 +398,7 @@ static int execute_command(int fd, const struct command *command, const char *te
     return 1;
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]){
     const struct command *command;
     const char *text = argc == 3 ? argv[2] : NULL;
     uint64_t value = 0;

@@ -3,6 +3,10 @@
 #include <stdint.h>
 #define DEMO_READY 1
 #define DEMO_RESULT 2
+/* Codice riconoscibile: exit/exit_group devono terminare senza inviare RESULT. */
+#define DEMO_EXIT_STATUS 42
+/* Il caso O_TRUNC non deve mai puntare a un modulo realmente caricato. */
+#define DEMO_ABSENT_MODULE "soa_demo_missing_target"
 struct demo_result {
     int kind;
     int error;
