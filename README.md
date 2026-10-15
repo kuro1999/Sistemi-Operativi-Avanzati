@@ -337,78 +337,42 @@ Per la demo, con modulo inizialmente scaricato e senza altre prove in parallelo:
 make demo
 ```
 
-Si può anche entrare in `demo/` ed eseguire `make`. In quella cartella,
-`make build` compila modulo, controller e demo senza eseguirli; `make clean`
-elimina solo i tre eseguibili della demo.
+Si può anche entrare in `demo/` ed eseguire `make`. `make build` compila
+modulo, controller e worker senza avviare le prove.
 
-Le operazioni privilegiate richiedono la password `sudo` se necessaria. Non
-vengono creati file di log. La demo rifiuta di partire se il modulo è già caricato;
-in caso di errore lascia il modulo caricato per consentire l'ispezione.
+La demo e' una sequenza dimostrativa: tre script Bash configurano il modulo
+tramite `user/stctl`, avviano piccoli programmi e mostrano risultati e statistiche.
+Non e' una suite completa di test automatici: "completata" indica che la sequenza
+ha terminato senza errori di esecuzione, non la verifica numerica di ogni proprieta'.
 
-La demo richiede monitor OFF, MAX=0 e registri vuoti. Usa direttamente le ioctl;
-`user/stctl` è il controller per l'uso manuale. Il Makefile genera `soa_demo` e
-i due eseguibili `demo_worker` e `demo_alt` dallo stesso sorgente `worker.c`.
-I worker vengono avviati automaticamente dalla demo.
+| Script | Operazioni mostrate |
+|---|---|
+| `demo/fase1.sh` | Registri, letture non privilegiate, modifica rifiutata senza root, selezione per programma e per EUID, bypass OFF e syscall non registrata. |
+| `demo/fase2.sh` | Budget condiviso fra processi e syscall; statistiche durante le attese con MAX=0 e rilascio tramite OFF. |
+| `demo/fase3.sh` | Due read su pipe con OFF/ON, exit ed exit_group con stato 42, rifiuti di delete_module sul modulo reale e scaricamento ordinario. |
 
-`PASS` indica il superamento di una verifica; `DEMO SUPERATA` conferma tutte le
-sei fasi, con monitor OFF, MAX=0 e registri vuoti. `FAIL` indica un errore;
-`INCONCLUSIVO` indica che l'osservazione non è sufficiente per concludere.
-Un timeout non è un esito positivo. La sequenza scarica il modulo solo dopo
-il successo della demo.
+Per eseguire una sola fase, dopo `make -C demo build`, usare ad esempio
+`bash demo/fase2.sh`. Eseguire come utente normale, con sudo disponibile e modulo
+inizialmente scaricato. Ogni fase carica un modulo nuovo e lo scarica alla fine.
+Il supporto comune in `demo/common.sh` gestisce cleanup e timeout. In caso di errore
+prova a disattivare il monitor e lascia il modulo caricato per l'ispezione.
+Non eseguire altri test o controller in parallelo.
 
-La fase 3 stampa anche programma, EUID, syscall, istante di completamento e
-durata di ogni worker, in ordine di completamento. L'origine dei tempi precede
-ENABLE; le durate user-space comprendono anche overhead e scheduling. MAX=0
-significa blocco di tutte le chiamate selezionate in questa implementazione ed
-è usato per osservare matching e rilascio in modo controllato.
+`demo/worker.c` genera `demo_worker` e `demo_alt`, due basename distinti per
+mostrare la selezione per eseguibile. Stampa tempi e risultati delle syscall;
+la prova pipe usa due piccoli file temporanei per partire dopo l'attivazione del
+monitor, evitando che le read del loader consumino il budget. I file vengono
+rimossi al termine. I tempi comprendono scheduling e overhead: sulla VM possono
+variare, e le partenze concorrenti non sono sincronizzate da una barriera.
 
-La fase 6 prova `exit` e `exit_group` in figli monothread: prima ne osserva il
-blocco con MAX=0, poi le ammette e verifica l'uscita con stato 42, senza messaggio
-di ritorno. Non è una prova di terminazione di un gruppo multithread.
-Prova inoltre l'autorimozione con `delete_module(O_NONBLOCK)`, sia con programma
-selezionato sia fuori matching, aspettandosi EWOULDBLOCK. Prima chiude il device
-e verifica `refcnt=0`: così il riferimento del device non maschera quello del
-wrapper. Non devono esserci controller o altre prove aperti in parallelo.
-Il caso `O_TRUNC` usa esclusivamente un nome di modulo inesistente, verificato
-anche dal worker, e deve ricevere EPERM con monitor ON e syscall registrata.
-Non viene mai richiesta la rimozione forzata del monitor o di altri moduli reali.
+Le syscall exit ed exit_group sono eseguite in processi monothread: 42 e' lo stato
+di terminazione scelto dal programma, non un ritorno della syscall. La prova di
+rimozione usa syscall_throttle anche con O_TRUNC: se la protezione fosse difettosa,
+la richiesta forzata potrebbe compromettere la VM. Usare una VM di prova con
+snapshot. Il risultato atteso e' EWOULDBLOCK per O_NONBLOCK ed EPERM aggiungendo
+O_TRUNC, sia con programma registrato sia non registrato. Le richieste sono root;
+il controller chiude il device prima che il worker esegua delete_module.
 
-Dopo le sei fasi, OFF e chiusura del device, il target `run` di `demo/Makefile` verifica lo
-scaricamento ordinario con timeout e l'assenza del modulo in `/sys/module`.
-Legge quindi la diagnostica nonreturning da `dmesg`, dopo il nuovo messaggio di
-caricamento, e stampa il messaggio reale e il confronto con i valori attesi:
-`avviate=2, completate=2, ritorni_inattesi=0`. Un vecchio log non basta.
-Il messaggio finale `DEMO SUPERATA` compare soltanto dopo questo confronto.
-Se il log manca o non è leggibile, l'esito è inconclusivo; se i contatori sono
-diversi da quelli attesi, è FAIL. Non eseguire altre prove o caricamenti del
-modulo in parallelo. Il log viene letto senza cancellarlo.
-
-Ogni fase mostra anche le osservazioni su cui si basano i controlli:
-
-- Fase 1: errno osservati/attesi, conteggi dei registri e operazioni non-root.
-- Fase 2: attesa individuale in `wchan`, waiter e risultato dopo il rilascio.
-- Fase 3: completamenti, waiter e intervallo dei campioni nella prima finestra.
-- Fase 4: incremento dell'integrale confrontato con quattro volte il tempo,
-  oltre al confronto degli snapshot con monitor OFF.
-- Fase 5: attesa della read sulla pipe, completamento di getpid e confronto
-  delle statistiche prima e dopo il completamento della read a monitor OFF.
-- Fase 6: stato di uscita, EOF, riferimenti iniziali, errno e stato del monitor;
-  dopo lo scaricamento, contatori effettivi dal kernel.
-
-Se `/proc/PID/wchan` o il contatore dei riferimenti non sono osservabili, oppure
-i tempi della VM non permettono la misura, l'esito è INCONCLUSIVO, non PASS.
-
-## Verifiche della demo
-
-Ogni riga descrive una singola fase. Le funzioni che conducono le prove sono in
-[`demo/demo.c`](demo/demo.c); l'ultima colonna indica le principali funzioni del
-modulo coinvolte nelle verifiche.
-
-| Fase | Funzione della demo e comportamento verificato | Funzioni principali del modulo e file |
-|---|---|---|
-| 1. Registri e privilegi | `registry_demo()`: aggiunta, consultazione, rimozione e permessi | [`module/device_ioctl.c`](module/device_ioctl.c): `st_device_ioctl_dispatch()`, `st_ioctl_uid_update()`, `st_ioctl_program_update()`, `st_ioctl_syscall_update()` |
-| 2. Selezione e OFF | `matching_demo()`: selezione per programma oppure EUID, deregistrazione e bypass OFF | [`module/syscall_hook.c`](module/syscall_hook.c): `st_syscall_is_relevant()`, `st_syscall_policy_still_matches()`; [`module/device_ioctl.c`](module/device_ioctl.c): `st_ioctl_enable()`, `st_ioctl_disable()` |
-| 3. Budget globale | `budget_demo()`: limite condiviso, sospensione e rinnovo del budget | [`module/rate_limiter.c`](module/rate_limiter.c): `st_rate_limiter_try_acquire()`, `st_rate_limiter_wait_for_change()`, `st_rate_limiter_timer_callback()` |
-| 4. Statistiche | `statistics_demo()`: media temporale, picchi, identità del peak e snapshot OFF | [`module/statistics.c`](module/statistics.c): `st_statistics_account_blocked_time_locked()`, `st_statistics_block_finish()`, `st_statistics_get_snapshot()` |
-| 5. Syscall bloccante | `blocking_demo()`: read su pipe, rinnovo del budget e DISABLE con syscall originale ancora attiva | [`module/syscall_hook.c`](module/syscall_hook.c): `st_generic_syscall_wrapper()`; [`module/device_ioctl.c`](module/device_ioctl.c): `st_ioctl_disable()` |
-| 6. Nonreturning e delete_module | `special_calls_demo()`: exit/exit_group, autorimozione rifiutata, O_TRUNC su target inesistente; poi unload dal Makefile | [`module/syscall_hook.c`](module/syscall_hook.c): `st_nonreturning_call_track()`, `st_sched_process_exit_callback()`, `st_call_original_syscall()`, `st_generic_syscall_wrapper()`, `st_syscall_hook_exit()` |
+Le liste con buffer insufficiente, il confronto esatto dell'integrale temporale,
+la matrice completa dei permessi e i contatori diagnostici kernel non vengono
+verificati automaticamente da questa versione dimostrativa.

@@ -1,73 +1,107 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include "protocol.h"
 
 _Static_assert(SYS_read == 0 && SYS_getpid == 39 && SYS_getppid == 110 &&
                SYS_exit == 60 && SYS_exit_group == 231 && SYS_delete_module == 176,
-               "La demo richiede l'ABI nativa x86-64");
-static uint64_t now_ns(void)
+               "La demo richiede Linux x86-64 nativo");
+
+static double milliseconds(void)
 {
-    struct timespec t;
-    if (clock_gettime(CLOCK_MONOTONIC, &t)) _exit(90);
-    return (uint64_t)t.tv_sec * 1000000000ULL + (uint64_t)t.tv_nsec;
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now)) { perror("clock_gettime"); exit(1); }
+    return now.tv_sec * 1000.0 + now.tv_nsec / 1000000.0;
 }
-static void send_result(int fd, const struct demo_result *r)
+
+/* Lo script abilita il monitor solo dopo l'avvio del programma:
+ * in questo modo le read del loader non consumano il budget. */
+static int pipe_demo(const char *ready, const char *start)
 {
-    const char *p = (const char *)r;
-    size_t left = sizeof(*r);
-    while (left) {
-        ssize_t n = write(fd, p, left);
-        if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) _exit(91);
-        p += n;
-        left -= (size_t)n;
+    int pipefd[2];
+    if (pipe(pipefd)) { perror("pipe"); return 1; }
+    FILE *file = fopen(ready, "w");
+    if (!file) { perror("ready"); return 1; }
+    fclose(file);
+    while (access(start, F_OK)) usleep(10000);
+
+    pid_t writer = fork();
+    if (writer < 0) { perror("fork"); return 1; }
+    if (!writer) {
+        close(pipefd[0]);
+        usleep(200000);
+        _exit(write(pipefd[1], "AB", 2) == 2 ? 0 : 1);
     }
+    close(pipefd[1]);
+    double durations[2];
+    char bytes[2];
+    for (int i = 1; i <= 2; i++) {
+        char byte;
+        double start_ms = milliseconds();
+        long result = syscall(SYS_read, pipefd[0], &byte, 1);
+        if (result != 1) { perror("read"); return 1; }
+        durations[i-1] = milliseconds()-start_ms;
+        bytes[i-1] = byte;
+    }
+    printf("  read 1: %c, %.1f ms; read 2: %c, %.1f ms\n",
+           bytes[0], durations[0], bytes[1], durations[1]);
+    close(pipefd[0]);
+    int status;
+    if (waitpid(writer, &status, 0) < 0) { perror("waitpid"); return 1; }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : 1;
 }
+
 int main(int argc, char **argv)
 {
-    if (argc != 5 && argc != 6) return 2;
-    int gate = atoi(argv[1]), output = atoi(argv[2]);
-    int number = atoi(argv[3]), data = atoi(argv[4]);
-    int force = argc == 6 && strcmp(argv[5], "force") == 0;
-    if (argc == 6 && (!force || number != SYS_delete_module)) return 2;
-    if (number != SYS_getpid && number != SYS_getppid && number != SYS_read &&
-        number != SYS_exit && number != SYS_exit_group && number != SYS_delete_module)
-        return 2;
-    struct demo_result r = {.kind = DEMO_READY, .euid = (uint32_t)geteuid()};
-    send_result(output, &r);
-    char byte;
-    /* recv non usa SYS_read: il gate resta fuori dalla syscall dimostrata. */
-    if (recv(gate, &byte, 1, MSG_WAITALL) != 1 || byte != 'G') return 3;
-    r.kind = DEMO_RESULT;
-    r.start_ns = now_ns();
-    errno = 0;
-    if (number == SYS_exit || number == SYS_exit_group) {
-        syscall(number, DEMO_EXIT_STATUS);
-        /* Un ritorno e' un errore: il padre riconosce uno stato diverso da 42. */
-        _exit(92);
+    setvbuf(stdout, NULL, _IONBF, 0);
+    const char *program = strrchr(argv[0], '/');
+    program = program ? program + 1 : argv[0];
+    if (argc < 2) return 2;
+    if (!strcmp(argv[1], "pipe") && argc == 4)
+        return pipe_demo(argv[2], argv[3]);
+    if (!strcmp(argv[1], "exit") || !strcmp(argv[1], "exit_group")) {
+        syscall(!strcmp(argv[1], "exit") ? SYS_exit : SYS_exit_group, 42);
+        perror("syscall senza ritorno");
+        return 1;
     }
-    if (number == SYS_delete_module) {
-        const char *target = "syscall_throttle";
-        r.value = syscall(SYS_delete_module, target,
-                          O_NONBLOCK | (force ? O_TRUNC : 0));
+    if (!strcmp(argv[1], "delete") || !strcmp(argv[1], "force")) {
+        int force = !strcmp(argv[1], "force");
+        errno = 0;
+        long result = syscall(SYS_delete_module, "syscall_throttle",
+                              O_NONBLOCK | (force ? O_TRUNC : 0));
+        int error = errno;
+        printf("%s: risultato=%ld, errno=%d (%s)",
+               force ? "O_NONBLOCK | O_TRUNC" : "O_NONBLOCK",
+               result, error, strerror(error));
+        /* Sono richieste di rimozione: il risultato viene mostrato allo spettatore. */
+        return 0;
+    }
+    if (strcmp(argv[1], "getpid") && strcmp(argv[1], "getppid")) return 2;
+    int count = argc == 3 ? atoi(argv[2]) : 1;
+    if (count < 1 || count > 100) return 2;
+    long number = !strcmp(argv[1], "getpid") ? SYS_getpid : SYS_getppid;
+    double durations[100];
+    for (int i = 1; i <= count; i++) {
+        double start_ms = milliseconds();
+        long result = syscall(number);
+        if (result < 0) { perror("syscall"); return 1; }
+        durations[i-1] = milliseconds()-start_ms;
+    }
+    /* Un'unica riga per le chiamate sequenziali, dopo averle eseguite tutte. */
+    if (count == 1) {
+        printf("  %s EUID=%u, %s: %.1f ms\n", program,
+               (unsigned)geteuid(), argv[1], durations[0]);
     } else {
-        r.value = number == SYS_read ? syscall(SYS_read, data, &byte, 1)
-                                     : syscall(number);
+        printf("  %s EUID=%u, %s: ", program, (unsigned)geteuid(), argv[1]);
+        for (int i = 0; i < count; i++)
+            printf("%s%.1f ms", i ? " → " : "", durations[i]);
+        putchar('\n');
     }
-    r.error = r.value < 0 ? errno : 0;
-    r.end_ns = now_ns();
-    send_result(output, &r);
-    /* Il padre controlla l'errno atteso di delete_module. */
-    if (number == SYS_delete_module) return 0;
-    if (r.error || (number == SYS_read && (r.value != 1 || byte != 'X')))
-        return 4;
     return 0;
 }
