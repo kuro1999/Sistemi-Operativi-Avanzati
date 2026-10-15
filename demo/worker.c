@@ -38,12 +38,6 @@ int main(int argc, char **argv)
     int number = atoi(argv[3]), data = atoi(argv[4]);
     int force = argc == 6 && strcmp(argv[5], "force") == 0;
     if (argc == 6 && (!force || number != SYS_delete_module)) return 2;
-    if (force) {
-        /* Anche se l'hook manca, non tentiamo una rimozione forzata reale. */
-        errno = 0;
-        if (access("/sys/module/" DEMO_ABSENT_MODULE, F_OK) == 0 || errno != ENOENT)
-            return 2;
-    }
     if (number != SYS_getpid && number != SYS_getppid && number != SYS_read &&
         number != SYS_exit && number != SYS_exit_group && number != SYS_delete_module)
         return 2;
@@ -61,7 +55,7 @@ int main(int argc, char **argv)
         _exit(92);
     }
     if (number == SYS_delete_module) {
-        const char *target = force ? DEMO_ABSENT_MODULE : "syscall_throttle";
+        const char *target = "syscall_throttle";
         r.value = syscall(SYS_delete_module, target,
                           O_NONBLOCK | (force ? O_TRUNC : 0));
     } else {
