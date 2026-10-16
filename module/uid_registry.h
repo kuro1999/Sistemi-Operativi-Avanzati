@@ -13,8 +13,6 @@ int st_uid_registry_remove(kuid_t uid);
 bool st_uid_registry_contains(kuid_t uid);
 unsigned int st_uid_registry_count(void);
 
-int st_uid_registry_snapshot(__u32 *uids,
-                             __u32 capacity,
-                             __u32 *count);
+int st_uid_registry_snapshot(__u32 *uids, __u32 capacity, __u32 *count);
 
 #endif

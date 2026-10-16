@@ -15,9 +15,8 @@ static const struct file_operations st_file_operations = {
     .unlocked_ioctl = st_device_ioctl_dispatch,
 };
 
-bool st_device_try_control_ioctl(unsigned int fd, unsigned int command,
-                                 unsigned long argument, long *result)
-{
+ //riconosce le ioctl del device che non saranno soggette al throttling
+bool st_device_try_control_ioctl(unsigned int fd, unsigned int command, unsigned long argument, long *result){
     struct file *file;
     long ret;
 
@@ -32,9 +31,6 @@ bool st_device_try_control_ioctl(unsigned int fd, unsigned int command,
         return false;
     }
 
-    /* Usa lo stesso file referenziato anche in caso di close/dup2 concorrenti.
-     * Le ioctl private riconosciute mantengono il controllo LSM ordinario.
-     */
     ret = security_file_ioctl(file, command, argument);
     if (!ret)
         ret = st_device_ioctl_dispatch(file, command, argument);
@@ -53,8 +49,7 @@ static struct miscdevice st_misc_device = {
     .mode = 0666,
 };
 
-int st_device_init(void)
-{
+int st_device_init(void){
     int ret = misc_register(&st_misc_device);
 
     if (ret) {
@@ -66,8 +61,7 @@ int st_device_init(void)
     return 0;
 }
 
-void st_device_exit(void)
-{
+void st_device_exit(void){
     misc_deregister(&st_misc_device);
     pr_info("syscall_throttle: device deregistrato\n");
 }

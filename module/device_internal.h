@@ -6,7 +6,6 @@
 struct file;
 
 bool st_device_is_control_command(unsigned int command);
-long st_device_ioctl_dispatch(struct file *file, unsigned int command,
-                              unsigned long argument);
+long st_device_ioctl_dispatch(struct file *file, unsigned int command, unsigned long argument);
 
 #endif

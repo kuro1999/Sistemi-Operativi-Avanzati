@@ -58,8 +58,7 @@ void st_statistics_session_stop(void);
 /*
  * Produce uno snapshot completamente inizializzato.
  */
-void st_statistics_get_snapshot(
-    struct st_statistics_snapshot *snapshot);
+void st_statistics_get_snapshot(struct st_statistics_snapshot *snapshot);
 
 /*
  * Acquisisce sotto lock il token della sessione per una invocazione
@@ -78,19 +77,13 @@ u64 st_statistics_get_invocation_generation(void);
  * Restituisce true se la chiamata è stata associata alla
  * sessione statistica corrente.
  */
-bool st_statistics_block_begin(
-    struct st_statistics_block_context *context,
-    u64 invocation_generation,
-    u64 throttle_start_ns,
-    kuid_t effective_uid,
-    const char *program_name);
+bool st_statistics_block_begin(struct st_statistics_block_context *context, u64 invocation_generation, u64 throttle_start_ns, kuid_t effective_uid, const char *program_name);
 
 /*
  * Termina una precedente attesa perché la syscall sta per
  * essere realmente eseguita.
  */
-void st_statistics_block_complete(
-    struct st_statistics_block_context *context);
+void st_statistics_block_complete(struct st_statistics_block_context *context);
 
 /*
  * Termina una precedente attesa interrotta da un segnale.
@@ -98,7 +91,6 @@ void st_statistics_block_complete(
  * In questo caso il peak delay non viene aggiornato, perché la
  * syscall originale non viene eseguita.
  */
-void st_statistics_block_interrupted(
-    struct st_statistics_block_context *context);
+void st_statistics_block_interrupted(struct st_statistics_block_context *context);
 
 #endif

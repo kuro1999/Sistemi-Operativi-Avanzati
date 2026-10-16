@@ -24,20 +24,17 @@ static int ioctl_failed(const char *name){
 }
 
 static int parse_decimal(const char *text, uint64_t limit, uint64_t *out){
-    char *end;
-    unsigned long long value;
-
-    if (text == NULL || out == NULL || text[0] == '\0')
+    if (!text || !out || !*text)
         return -1;
 
-    /* Solo cifre decimali: niente segni, spazi o prefissi. */
-    for (const char *p = text; *p != '\0'; p++)
+    for (const char *p = text; *p; p++)
         if (*p < '0' || *p > '9')
             return -1;
 
     errno = 0;
-    value = strtoull(text, &end, 10);
-    if (errno == ERANGE || end == text || *end != '\0' || value > limit)
+    unsigned long long value = strtoull(text, NULL, 10);
+
+    if (errno == ERANGE || value > limit)
         return -1;
 
     *out = (uint64_t)value;
@@ -118,7 +115,7 @@ static int execute_program_update(int fd, const char *name, int add){
 }
 
 static int execute_max_set(int fd, uint64_t max_invocations){
-    struct st_max_config request = {.max_invocations = (__u64)max_invocations};
+    struct st_max_config request = {.max_invocations = max_invocations};
 
     if (ioctl(fd, ST_IOCTL_MAX_SET, &request) == -1) {
         switch (errno) {
@@ -182,9 +179,7 @@ static int execute_statistics_get(int fd){
         printf("Effective UID del peak: non disponibile\n");
         printf("Programma del peak: non disponibile\n");
     } else {
-        printf("Peak delay: %llu ns (%.6f ms)\n",
-               (unsigned long long)snapshot.peak_delay_ns,
-               (double)snapshot.peak_delay_ns / 1000000.0);
+        printf("Peak delay: %llu ns (%.6f ms)\n", (unsigned long long)snapshot.peak_delay_ns, (double)snapshot.peak_delay_ns / 1000000.0);
         printf("Effective UID del peak: %u\n", snapshot.peak_euid);
         printf("Programma del peak: %s\n", snapshot.peak_program);
     }
@@ -203,10 +198,9 @@ static const struct registry_info {
     { "SYSCALL", "System call registrate", sizeof(__u32) },
 };
 
-/* Ogni ioctl usa il proprio tipo UAPI: nessun cast tra strutture diverse. */
 static int read_count(int fd, enum registry kind, __u32 *count){
     int result;
-
+ // in base al tipo recuperiamo il count
     if (kind == REG_UID) {
         struct st_uid_count response = {0};
         result = ioctl(fd, ST_IOCTL_UID_GET_COUNT, &response);
@@ -227,7 +221,7 @@ static int read_count(int fd, enum registry kind, __u32 *count){
 }
 
 static int read_list(int fd, enum registry kind, void *items, __u32 capacity, __u32 *count){
-    __u64 pointer = (__u64)(uintptr_t)items;
+    __u64 pointer = (uintptr_t)items;
     int result;
 
     if (kind == REG_UID) {
@@ -247,23 +241,21 @@ static int read_list(int fd, enum registry kind, void *items, __u32 capacity, __
 }
 
 static int print_list(enum registry kind, const void *items, __u32 count){
-    const struct st_program_name *programs = items;
-    const __u32 *numbers = items;
-
-    if (kind == REG_SYSCALL) {
-        for (__u32 i = 1; i < count; i++)
-            if (numbers[i] <= numbers[i - 1])
-                return fail("Risposta SYSCALL_LIST non valida: ordine dei numeri incoerente.\n");
-    }
     printf("%s: %u\n", registries[kind].title, count);
+
     if (!count)
-        printf("  (vuoto)\n");
+        puts("  (vuoto)");
+
     for (__u32 i = 0; i < count; i++) {
         if (kind == REG_PROGRAM) {
+            const struct st_program_name *programs = items;
+
             if (!memchr(programs[i].name, '\0', sizeof(programs[i].name)))
-                return fail("Risposta PROGRAM_LIST non valida: nome non terminato.\n");
+                return fail("Nome del programma non terminato.\n");
+
             printf("  %s\n", programs[i].name);
         } else {
+            const __u32 *numbers = items;
             printf("  %u\n", numbers[i]);
         }
     }
@@ -366,10 +358,16 @@ static const struct command {
 };
 
 static void print_usage(const char *program_name){
+    size_t command_count = sizeof(commands) / sizeof(commands[0]);
     fprintf(stderr, "Uso:\n");
-    for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
-        fprintf(stderr, "  %s %s%s%s\n", program_name, commands[i].name,
-                commands[i].argument ? " " : "", commands[i].argument ? commands[i].argument : "");
+    for (size_t i = 0; i < command_count; i++) {
+        fprintf(stderr, "  %s %s", program_name, commands[i].name);
+
+        if (commands[i].argument != NULL)
+            fprintf(stderr, " %s", commands[i].argument);
+
+        fprintf(stderr, "\n");
+    }
 }
 
 static const struct command *find_command(const char *name){
@@ -387,11 +385,11 @@ static int execute_command(int fd, const struct command *command, const char *te
     case OP_LIST:
         return execute_registry(fd, command->option, command->operation == OP_LIST);
     case OP_UID:
-        return execute_uid_update(fd, (__u32)value, command->option);
+        return execute_uid_update(fd, value, command->option);
     case OP_PROGRAM:
         return execute_program_update(fd, text, command->option);
     case OP_SYSCALL:
-        return execute_syscall_update(fd, (__u32)value, command->option);
+        return execute_syscall_update(fd, value, command->option);
     case OP_MAX_SET:
         return execute_max_set(fd, value);
     }

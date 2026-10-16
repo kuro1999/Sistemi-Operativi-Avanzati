@@ -50,8 +50,7 @@ static void st_rate_limiter_timer_callback(struct timer_list *timer){
         if (time_before_eq(state->next_expiry, jiffies))
             state->next_expiry = jiffies + HZ;
 
-        mod_timer(&state->window_timer,
-                  state->next_expiry);
+        mod_timer(&state->window_timer, state->next_expiry);
 
         wake_waiters = true;
     }
@@ -110,7 +109,6 @@ int st_rate_limiter_start(void){
     } else if (started) {
         pr_info("syscall_throttle: rate limiter avviato\n");
     }
-
     return ret;
 }
 
@@ -192,8 +190,7 @@ enum st_rate_limiter_decision st_rate_limiter_try_acquire(u64 expected_generatio
      * DISABLE arresta il rate limiter
      * thread entra qui successivamente
      *
-     * In quel caso la richiesta deve attraversare il sistema
-     * senza essere bloccata.
+     * In quel caso la richiesta deve attraversare il sistema senza essere bloccata.
      */
     } else if (!st_rate_limiter.running) {
         decision = ST_RATE_LIMITER_BYPASS;
@@ -206,8 +203,7 @@ enum st_rate_limiter_decision st_rate_limiter_try_acquire(u64 expected_generatio
     } else if (expected_generation != st_rate_limiter.generation) {
         decision = ST_RATE_LIMITER_RETRY;
 
-    } else if (st_rate_limiter.admitted <
-               st_rate_limiter.max_invocations) {
+    } else if (st_rate_limiter.admitted < st_rate_limiter.max_invocations) {
         st_rate_limiter.admitted++;
         decision = ST_RATE_LIMITER_ALLOW;
 
@@ -234,8 +230,7 @@ static bool st_rate_limiter_state_changed(u64 observed_generation){
 
     spin_lock_bh(&st_rate_limiter.lock);
 
-    changed =
-        st_rate_limiter.generation != observed_generation ||
+    changed = st_rate_limiter.generation != observed_generation ||
         !st_rate_limiter.running ||
         st_rate_limiter.stopping;
 
@@ -278,12 +273,12 @@ void st_rate_limiter_set_max(u64 max_invocations){
     }
 
     spin_unlock_bh(&st_rate_limiter.lock);
-
     if (changed)
         wake_up_all(&st_rate_limiter.wait_queue);
 }
 
 u64 st_rate_limiter_get_max(void){
+
     u64 max_invocations;
     spin_lock_bh(&st_rate_limiter.lock);
     max_invocations = st_rate_limiter.max_invocations;

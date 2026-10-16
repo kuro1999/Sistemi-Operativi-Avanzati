@@ -44,8 +44,7 @@ static struct st_statistics_state st_statistics;
 static DECLARE_WAIT_QUEUE_HEAD(st_statistics_drain_queue);
 
 /* Richiede st_statistics_lock. */
-static void st_statistics_account_blocked_time_locked(u64 now_ns)
-{
+static void st_statistics_account_blocked_time_locked(u64 now_ns){
     u64 elapsed_ns;
     u64 weighted_ns;
 
@@ -57,16 +56,14 @@ static void st_statistics_account_blocked_time_locked(u64 now_ns)
     elapsed_ns = now_ns - st_statistics.last_blocked_change_ns;
     if (check_mul_overflow(elapsed_ns, (u64)st_statistics.current_blocked, &weighted_ns))
         weighted_ns = U64_MAX;
-    if (check_add_overflow(st_statistics.blocked_thread_time_ns, weighted_ns,
-                          &st_statistics.blocked_thread_time_ns))
+    if (check_add_overflow(st_statistics.blocked_thread_time_ns, weighted_ns, &st_statistics.blocked_thread_time_ns))
         st_statistics.blocked_thread_time_ns = U64_MAX;
     st_statistics.last_blocked_change_ns = now_ns;
 }
 
 /* Richiede st_statistics_lock. Azzera contatori e apre una nuova continuita'.
  * MAX_SET ripristina poi la continuita' precedente e trasferisce i waiter. */
-static void st_statistics_reset_session_locked(u64 now_ns, bool session_active)
-{
+static void st_statistics_reset_session_locked(u64 now_ns, bool session_active){
     u64 next_generation;
 
     /* Generazione non nulla anche in caso di wrap-around. */
@@ -88,8 +85,7 @@ static void st_statistics_reset_session_locked(u64 now_ns, bool session_active)
  * Ordine dei lock: limiter -> statistiche; mai l'ordine inverso.
  * Nessuna allocazione, attesa o modifica degli stack dei waiter.
  */
-void st_statistics_max_changed(void)
-{
+void st_statistics_max_changed(void){
     unsigned long flags;
     u64 continuity;
     u32 carried;
@@ -106,8 +102,7 @@ void st_statistics_max_changed(void)
     spin_unlock_irqrestore(&st_statistics_lock, flags);
 }
 
-void st_statistics_init(void)
-{
+void st_statistics_init(void){
     unsigned long flags;
 
     spin_lock_irqsave(&st_statistics_lock, flags);
@@ -117,8 +112,7 @@ void st_statistics_init(void)
     pr_info("syscall_throttle: statistiche inizializzate\n");
 }
 
-void st_statistics_session_start(void)
-{
+void st_statistics_session_start(void){
     unsigned long flags;
     u64 generation;
     u64 now_ns;
@@ -134,8 +128,7 @@ void st_statistics_session_start(void)
 }
 
 /* Lettura protetta della condizione della wait queue. */
-static bool st_statistics_waiters_drained(void)
-{
+static bool st_statistics_waiters_drained(void){
     unsigned long flags;
     bool drained;
 
@@ -148,8 +141,7 @@ static bool st_statistics_waiters_drained(void)
 /* Il chiamante ha fermato il limiter e risvegliato i waiter; serializza ENABLE
  * con questa chiusura. Attende le attese contabilizzate, non le syscall
  * originali: block_complete() precede la loro esecuzione. */
-void st_statistics_session_stop(void)
-{
+void st_statistics_session_stop(void){
     unsigned long flags;
     u64 generation = 0U;
     u64 now_ns;
@@ -180,8 +172,7 @@ void st_statistics_session_stop(void)
                 "generazione=%llu, waiter_residui=0\n", (unsigned long long)generation);
 }
 
-u64 st_statistics_get_invocation_generation(void)
-{
+u64 st_statistics_get_invocation_generation(void){
     unsigned long flags;
     u64 generation;
 
@@ -196,10 +187,7 @@ u64 st_statistics_get_invocation_generation(void)
     return generation;
 }
 
-bool st_statistics_block_begin(struct st_statistics_block_context *context,
-    u64 invocation_generation, u64 throttle_start_ns,
-    kuid_t effective_uid, const char *program_name)
-{
+bool st_statistics_block_begin(struct st_statistics_block_context *context, u64 invocation_generation, u64 throttle_start_ns, kuid_t effective_uid, const char *program_name){
     unsigned long flags;
     u64 now_ns;
     bool counted;
@@ -244,8 +232,7 @@ out_unlock:
 
 /* MAX_SET conserva i contesti; ENABLE delimita una nuova continuita'.
  * I contesti esterni a tale intervallo non modificano i contatori. */
-static void st_statistics_block_finish(struct st_statistics_block_context *context, bool interrupted)
-{
+static void st_statistics_block_finish(struct st_statistics_block_context *context, bool interrupted){
     unsigned long flags;
     u64 delay_ns;
     u64 delay_start_ns;
@@ -295,18 +282,15 @@ out_unlock:
         wake_up_all(&st_statistics_drain_queue);
 }
 
-void st_statistics_block_complete(struct st_statistics_block_context *context)
-{
+void st_statistics_block_complete(struct st_statistics_block_context *context){
     st_statistics_block_finish(context, false);
 }
 
-void st_statistics_block_interrupted(struct st_statistics_block_context *context)
-{
+void st_statistics_block_interrupted(struct st_statistics_block_context *context){
     st_statistics_block_finish(context, true);
 }
 
-void st_statistics_get_snapshot(struct st_statistics_snapshot *snapshot)
-{
+void st_statistics_get_snapshot(struct st_statistics_snapshot *snapshot){
     unsigned long flags;
     u64 observation_end_ns;
     u64 now_ns;
@@ -339,8 +323,7 @@ void st_statistics_get_snapshot(struct st_statistics_snapshot *snapshot)
     spin_unlock_irqrestore(&st_statistics_lock, flags);
 }
 
-void st_statistics_exit(void)
-{
+void st_statistics_exit(void){
     unsigned long flags;
 
     st_statistics_session_stop();

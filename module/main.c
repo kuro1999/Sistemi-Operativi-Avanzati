@@ -11,14 +11,12 @@
 #include "syscall_registry.h"
 #include "uid_registry.h"
 
-static int __init syscall_throttle_init(void)
-{
+static int __init syscall_throttle_init(void){
     int ret;
 
     /*
-    * Inizializziamo tutti i sottosistemi prima di installare
-    * l'hook, affinché i wrapper delle syscall trovino
-    * le strutture dati già pronte all'uso.
+    * Inizializziamo tutti i sottosistemi prima di installare l'hhok, affinche i wrapper
+    * delle syscall trovino le strutture dati già pronte all'uso.
     */
 
     st_uid_registry_init();
@@ -40,9 +38,8 @@ static int __init syscall_throttle_init(void)
 
 fail_device:
     /*
-     * Rendiamo prima inutilizzabile il rate limiter e
-     * risvegliamo eventuali utilizzatori, poi rimuoviamo
-     * definitivamente l'hook.
+     * Rendiamo prima inutilizzabile il rate limiter e risvegliamo eventuali utilizzatori,
+     * poi rimuoviamo definitivamente l'hook.
      */
     st_rate_limiter_exit();
     st_syscall_hook_exit();
@@ -62,8 +59,7 @@ fail_common:
     return ret;
 }
 
-static void __exit syscall_throttle_exit(void)
-{
+static void __exit syscall_throttle_exit(void){
     /*
      * Prima impediamo l'arrivo di nuovi comandi user-space.
      *

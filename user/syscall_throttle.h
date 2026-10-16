@@ -32,9 +32,7 @@ struct st_uid_count {
  * Richiesta per ottenere l'elenco degli UID registrati.
  *
  * uids_ptr contiene l'indirizzo user-space di un array di __u32.
- *
  * capacity indica quanti elementi può contenere l'array.
- *
  * count viene scritto dal kernel con il numero di UID registrati.
  */
 struct st_uid_list_request {
@@ -47,8 +45,8 @@ struct st_uid_list_request {
  * Richiesta relativa al nome di un programma.
  *
  * name contiene esclusivamente il basename dell'eseguibile
+ * Basename terminato da NUL, senza caratteri slash.
  */
-/* Basename terminato da NUL, senza caratteri slash. */
 struct st_program_request {
     char name[ST_PROGRAM_NAME_CAPACITY];
 };
@@ -90,16 +88,11 @@ struct st_syscall_count {
 };
 
 /*
- * Richiesta per ottenere uno snapshot dei numeri di system call
- * presenti nel registro.
+ * Richiesta per ottenere uno snapshot dei numeri di system call presenti nel registro.
  *
  * numbers_ptr indica un array user-space di elementi __u32.
- *
- * capacity indica quanti elementi possono essere contenuti
- * nell'array.
- *
- * count viene aggiornato dal kernel con il numero di elementi
- * necessari oppure effettivamente restituiti.
+ * capacity indica quanti elementi possono essere contenuti nell'array.
+ * count viene aggiornato dal kernel con il numero di elementi corretto
  */
 struct st_syscall_list_request {
     __aligned_u64 numbers_ptr;
@@ -118,30 +111,17 @@ struct st_max_config {
 };
 
 /*
- * Snapshot delle statistiche del throttling.
+ * Statistiche della sessione: durata, thread bloccati e ritardo massimo.
+ * La media temporale è blocked_thread_time_ns / observation_ns,
+ * se observation_ns è diverso da zero.
  *
- * observation_ns:
- *   durata della sessione statistica.
+ * Un cambio effettivo di MAX a monitor ON avvia una nuova sessione,
+ * includendo i waiter presenti e misurandone il ritardo da quel momento.
+ * Non ripristina il budget consumato né sposta la scadenza della finestra.
+ * MAX invariato o modificato a monitor OFF conserva le statistiche.
  *
- * blocked_thread_time_ns:
- *   integrale temporale del numero di thread bloccati,
- *   espresso in thread-nanosecondi.
- *
- * La media temporale dei thread bloccati viene calcolata
- * nello user-space come:
- *
- *   blocked_thread_time_ns / observation_ns
- *
- * Un cambio effettivo di MAX a monitor ON apre una nuova osservazione.
- * I waiter presenti sono inclusi nel numero corrente e nel picco iniziale. Il loro delay decorre dall'inizio della nuova sessione.
- * MAX invariato non azzera; MAX_SET a monitor OFF conserva lo snapshot.
- * Budget consumato e scadenza della finestra non vengono azzerati.
- *
- * peak_delay_ns misura il massimo ritardo prima dell'esecuzione della
- * syscall, limitato alla sessione corrente per le attese trasferite.
- *
- * peak_valid indica se i campi peak_* contengono un campione
- * valido. session_active indica se la sessione è ancora aperta.
+ * peak_valid indica la validità del campione di ritardo massimo;
+ * session_active indica se la sessione è attiva.
  */
 struct st_statistics_snapshot {
     __aligned_u64 observation_ns;
@@ -166,16 +146,7 @@ struct st_statistics_snapshot {
  * ma restano soggette ai controlli LSM e ai privilegi del driver.
  */
 
-/* Il bypass vale solo per comandi ST_IOCTL_* riconosciuti sul device.
- * Non comprende apertura del device o avvio del controller.
- */
-/* Il numero 0x00 e' ritirato e non deve essere riutilizzato. */
-
-/*
- * Attivazione e disattivazione del monitor.
- *
- * Questi comandi non trasferiscono dati.
- */
+ // Attivazione e disattivazione del monitor.
 #define ST_IOCTL_ENABLE \
     _IO(ST_IOCTL_MAGIC, 0x01)
 
@@ -215,15 +186,10 @@ struct st_statistics_snapshot {
     _IOWR(ST_IOCTL_MAGIC, 0x23, struct st_program_list_request)
 
 /*
- * Gestione del registro dei numeri di system call x86-64.
- *
- * Le richieste vengono trasferite dallo user-space al kernel.
+ * Nel percorso intercettato, delete_module con O_TRUNC
+ * viene rifiutata con EPERM, anche fuori dalla selezione della policy.
  */
-/* delete_module e registrabile: il wrapper mantiene un riferimento al
- * monitor e ne impedisce l autorimozione ordinaria. O_TRUNC viene
- * rifiutato con EPERM nel percorso intercettato, anche senza matching.
- * Per scaricare: DISABLE, poi rmmod dopo il rilascio dei riferimenti.
- */
+ 
 #define ST_IOCTL_SYSCALL_ADD \
     _IOW(ST_IOCTL_MAGIC, 0x30, struct st_syscall_request)
 
@@ -243,10 +209,7 @@ struct st_statistics_snapshot {
 #define ST_IOCTL_MAX_GET \
     _IOR(ST_IOCTL_MAGIC, 0x41, struct st_max_config)
 
-/* Consultazione pubblica: 0x50 ritirato per il precedente layout del peak. */
 #define ST_IOCTL_STATS_GET \
     _IOR(ST_IOCTL_MAGIC, 0x52, struct st_statistics_snapshot)
-
-/* 0x51 non riutilizzato: apparteneva al comando di reset manuale rimosso. */
 
 #endif

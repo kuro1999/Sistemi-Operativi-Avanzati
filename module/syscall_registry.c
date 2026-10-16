@@ -25,13 +25,11 @@ static DECLARE_BITMAP(st_syscall_bitmap, ST_SYSCALL_LIMIT);
 static DEFINE_MUTEX(st_syscall_registry_lock);
 static unsigned int st_syscall_entries_count;
 
-static bool st_syscall_number_is_valid(unsigned int number)
-{
+static bool st_syscall_number_is_valid(unsigned int number){
     return number < ST_SYSCALL_LIMIT;
 }
 
-void st_syscall_registry_init(void)
-{
+void st_syscall_registry_init(void){
     /*
      * L'inizializzazione è esplicita anche se una variabile
      * statica partirebbe già azzerata.
@@ -44,8 +42,7 @@ void st_syscall_registry_init(void)
             (unsigned int)ST_SYSCALL_LIMIT);
 }
 
-void st_syscall_registry_exit(void)
-{
+void st_syscall_registry_exit(void){
     /*
      * Il bitmap non contiene allocazioni dinamiche. È comunque
      * azzerato per lasciare il componente in uno stato definito.
@@ -56,8 +53,7 @@ void st_syscall_registry_exit(void)
     pr_info("syscall_throttle: registro system call rilasciato\n");
 }
 
-int st_syscall_registry_add(unsigned int number)
-{
+int st_syscall_registry_add(unsigned int number){
     if (!st_syscall_number_is_valid(number))
         return -EINVAL;
 
@@ -80,8 +76,7 @@ int st_syscall_registry_add(unsigned int number)
     return 0;
 }
 
-int st_syscall_registry_remove(unsigned int number)
-{
+int st_syscall_registry_remove(unsigned int number){
     if (!st_syscall_number_is_valid(number))
         return -EINVAL;
 
@@ -100,8 +95,7 @@ int st_syscall_registry_remove(unsigned int number)
     return 0;
 }
 
-bool st_syscall_registry_contains(unsigned int number)
-{
+bool st_syscall_registry_contains(unsigned int number){
     if (!st_syscall_number_is_valid(number))
         return false;
 
@@ -115,8 +109,7 @@ bool st_syscall_registry_contains(unsigned int number)
     return test_bit(number, st_syscall_bitmap);
 }
 
-unsigned int st_syscall_registry_count(void)
-{
+unsigned int st_syscall_registry_count(void){
     unsigned int count;
 
     mutex_lock(&st_syscall_registry_lock);
@@ -126,10 +119,7 @@ unsigned int st_syscall_registry_count(void)
     return count;
 }
 
-int st_syscall_registry_snapshot(__u32 *numbers,
-                                 __u32 capacity,
-                                 __u32 *count)
-{
+int st_syscall_registry_snapshot(__u32 *numbers, __u32 capacity, __u32 *count){
     unsigned long number;
     __u32 required;
     __u32 index = 0U;
@@ -175,9 +165,7 @@ int st_syscall_registry_snapshot(__u32 *numbers,
      * for_each_set_bit() visita i bit impostati in ordine
      * crescente. L'array risultante è quindi già ordinato.
      */
-    for_each_set_bit(number,
-                     st_syscall_bitmap,
-                     ST_SYSCALL_LIMIT) {
+    for_each_set_bit(number, st_syscall_bitmap, ST_SYSCALL_LIMIT) {
         /*
          * Il controllo è difensivo: count e bitmap dovrebbero
          * essere sempre coerenti perché protetti dallo stesso

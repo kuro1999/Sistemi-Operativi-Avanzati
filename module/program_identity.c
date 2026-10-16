@@ -12,8 +12,7 @@
 
 #include "program_identity.h"
 
-int st_program_get_current_name(char *name, size_t capacity)
-{
+int st_program_get_current_name(char *name, size_t capacity){
     struct mm_struct *mm;
     struct file *exe_file;
     struct dentry *exe_dentry;
@@ -81,8 +80,7 @@ int st_program_get_current_name(char *name, size_t capacity)
      * Manteniamo inoltre la semantica UAPI del registro, che
      * accetta nomi lunghi al massimo ST_PROGRAM_NAME_MAX.
      */
-    if (length >= capacity ||
-        length > ST_PROGRAM_NAME_MAX) {
+    if (length >= capacity || length > ST_PROGRAM_NAME_MAX) {
         ret = -ENAMETOOLONG;
         goto out_release_snapshot;
     }

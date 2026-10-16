@@ -8,8 +8,8 @@
 /*
  * Unica sorgente dello stato globale del monitor.
  *
- * La key nasce falsa: il percorso ottimizzato corrisponde quindi
- * al monitor disattivato.
+ * La key nasce false: il percorso ottimizzato corrisponde quindi
+ * al monitor disattivato. Se true policy applicata. 
  */
 DECLARE_STATIC_KEY_FALSE(st_monitor_enabled_key);
 

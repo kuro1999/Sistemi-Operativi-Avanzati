@@ -15,9 +15,7 @@ void st_rate_limiter_init(void);
 void st_rate_limiter_exit(void);
 /*
  * Avvia una nuova sequenza di finestre globali.
- *
- * Se il rate limiter è già attivo, l'operazione è idempotente
- * e non azzera la finestra corrente.
+ * Se il rate limiter è già attivo, l'operazione è idempotente e non azzera la finestra corrente.
  */
 int st_rate_limiter_start(void);
 
@@ -48,10 +46,7 @@ void st_rate_limiter_policy_changed(void);
  * casi non viene scritto e il chiamante non deve leggerlo.
  */
 enum st_rate_limiter_decision
-st_rate_limiter_try_acquire(
-    u64 expected_generation,
-    u64 *window_generation,
-    u64 *throttle_start_ns);
+st_rate_limiter_try_acquire(u64 expected_generation, u64 *window_generation, u64 *throttle_start_ns);
 
 /*
  * Attende in modo interrompibile che lo stato osservato dal
@@ -69,8 +64,7 @@ st_rate_limiter_try_acquire(
  *   0             stato modificato, ripetere try_acquire()
  *   -ERESTARTSYS  attesa interrotta da un segnale
  */
-int st_rate_limiter_wait_for_change(
-    u64 observed_generation);
+int st_rate_limiter_wait_for_change(u64 observed_generation);
 
 /*
  * Imposta il numero massimo di invocazioni ammesse

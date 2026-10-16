@@ -19,8 +19,7 @@ static unsigned int st_uid_entries_count;
 
 /* Richiede il lock del registro in lettura o scrittura.
  * Il puntatore restituito resta protetto solo finche' il lock e' acquisito. */
-static struct st_uid_entry *st_uid_find_locked(kuid_t uid)
-{
+static struct st_uid_entry *st_uid_find_locked(kuid_t uid){
     struct st_uid_entry *entry;
 
     list_for_each_entry(entry, &st_uid_entries, node)
@@ -29,16 +28,14 @@ static struct st_uid_entry *st_uid_find_locked(kuid_t uid)
     return NULL;
 }
 
-void st_uid_registry_init(void)
-{
+void st_uid_registry_init(void){
     INIT_LIST_HEAD(&st_uid_entries);
     st_uid_entries_count = 0U;
 
     pr_info("syscall_throttle: registro UID inizializzato\n");
 }
 
-void st_uid_registry_exit(void)
-{
+void st_uid_registry_exit(void){
     struct st_uid_entry *entry;
     struct st_uid_entry *next;
 
@@ -56,8 +53,7 @@ void st_uid_registry_exit(void)
     pr_info("syscall_throttle: registro UID rilasciato\n");
 }
 
-int st_uid_registry_add(kuid_t uid)
-{
+int st_uid_registry_add(kuid_t uid){
     struct st_uid_entry *new_entry;
 
     if (!uid_valid(uid))
@@ -85,8 +81,7 @@ int st_uid_registry_add(kuid_t uid)
     return 0;
 }
 
-int st_uid_registry_remove(kuid_t uid)
-{
+int st_uid_registry_remove(kuid_t uid){
     struct st_uid_entry *removed_entry;
 
     if (!uid_valid(uid))
@@ -101,7 +96,6 @@ int st_uid_registry_remove(kuid_t uid)
     }
 
     up_write(&st_uid_registry_lock);
-
     if (removed_entry == NULL)
         return -ENOENT;
 
@@ -109,24 +103,20 @@ int st_uid_registry_remove(kuid_t uid)
     return 0;
 }
 
-bool st_uid_registry_contains(kuid_t uid)
-{
+bool st_uid_registry_contains(kuid_t uid){
     bool found;
 
     if (!uid_valid(uid))
         return false;
 
     down_read(&st_uid_registry_lock);
-
     found = st_uid_find_locked(uid) != NULL;
-
     up_read(&st_uid_registry_lock);
 
     return found;
 }
 
-unsigned int st_uid_registry_count(void)
-{
+unsigned int st_uid_registry_count(void){
     unsigned int count;
 
     down_read(&st_uid_registry_lock);
@@ -136,10 +126,7 @@ unsigned int st_uid_registry_count(void)
     return count;
 }
 
-int st_uid_registry_snapshot(__u32 *uids,
-                             __u32 capacity,
-                             __u32 *count)
-{
+int st_uid_registry_snapshot(__u32 *uids, __u32 capacity, __u32 *count){
     struct st_uid_entry *entry;
     __u32 total;
     __u32 index = 0U;
@@ -151,7 +138,6 @@ int st_uid_registry_snapshot(__u32 *uids,
         return -EINVAL;
 
     down_read(&st_uid_registry_lock);
-
     total = (__u32)st_uid_entries_count;
     *count = total;
 
@@ -166,7 +152,6 @@ int st_uid_registry_snapshot(__u32 *uids,
 
     list_for_each_entry(entry, &st_uid_entries, node) {
         uid_t numeric_uid;
-
         /*
          * Il registro conserva kuid_t. Per l'UAPI dobbiamo
          * riconvertire ogni elemento nel valore numerico
@@ -186,4 +171,3 @@ int st_uid_registry_snapshot(__u32 *uids,
 
     return 0;
 }
-

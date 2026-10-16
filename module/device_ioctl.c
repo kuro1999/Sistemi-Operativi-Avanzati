@@ -19,8 +19,7 @@
 /* Serializza ENABLE, DISABLE e MAX_SET. I registri hanno lock propri. */
 static DEFINE_MUTEX(st_policy_lock);
 
-static long st_ioctl_enable(unsigned long argument)
-{
+static long st_ioctl_enable(unsigned long argument){
     int ret = 0;
 
     (void)argument;
@@ -37,8 +36,7 @@ static long st_ioctl_enable(unsigned long argument)
     return ret;
 }
 
-static long st_ioctl_disable(unsigned long argument)
-{
+static long st_ioctl_disable(unsigned long argument){
     (void)argument;
     mutex_lock(&st_policy_lock);
     if (st_monitor_is_enabled()) {
@@ -53,20 +51,14 @@ static long st_ioctl_disable(unsigned long argument)
     return 0;
 }
 
-static long st_ioctl_get_status(unsigned long argument)
-{
-    struct st_monitor_status response = {
-        .enabled = st_monitor_is_enabled() ? 1U : 0U,
-    };
+static long st_ioctl_get_status(unsigned long argument){
+    struct st_monitor_status response = {.enabled = st_monitor_is_enabled() ? 1U : 0U};
 
-    return copy_to_user((void __user *)argument, &response, sizeof(response))
-        ? -EFAULT : 0;
+    return copy_to_user((void __user *)argument, &response, sizeof(response)) ? -EFAULT : 0;
 }
 
-static long st_ioctl_max_set(unsigned long argument)
-{
+static long st_ioctl_max_set(unsigned long argument){
     struct st_max_config request;
-
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
 
@@ -77,27 +69,18 @@ static long st_ioctl_max_set(unsigned long argument)
     return 0;
 }
 
-static long st_ioctl_max_get(unsigned long argument)
-{
-    struct st_max_config response = {
-        .max_invocations = st_rate_limiter_get_max(),
-    };
-
-    return copy_to_user((void __user *)argument, &response, sizeof(response))
-        ? -EFAULT : 0;
+static long st_ioctl_max_get(unsigned long argument){
+    struct st_max_config response = {.max_invocations = st_rate_limiter_get_max()};
+    return copy_to_user((void __user *)argument, &response, sizeof(response)) ? -EFAULT : 0;
 }
 
-static long st_ioctl_stats_get(unsigned long argument)
-{
+static long st_ioctl_stats_get(unsigned long argument){
     struct st_statistics_snapshot response;
-
     st_statistics_get_snapshot(&response);
-    return copy_to_user((void __user *)argument, &response, sizeof(response))
-        ? -EFAULT : 0;
+    return copy_to_user((void __user *)argument, &response, sizeof(response)) ? -EFAULT : 0;
 }
 
-static long st_ioctl_uid_update(unsigned long argument, bool add)
-{
+static long st_ioctl_uid_update(unsigned long argument, bool add){
     struct st_uid_request request;
     kuid_t uid;
 
@@ -110,79 +93,63 @@ static long st_ioctl_uid_update(unsigned long argument, bool add)
     return add ? st_uid_registry_add(uid) : st_uid_registry_remove(uid);
 }
 
-static long st_ioctl_uid_add(unsigned long argument)
-{
+static long st_ioctl_uid_add(unsigned long argument){
     return st_ioctl_uid_update(argument, true);
 }
 
-static long st_ioctl_uid_remove(unsigned long argument)
-{
+static long st_ioctl_uid_remove(unsigned long argument){
     return st_ioctl_uid_update(argument, false);
 }
 
-static long st_ioctl_program_update(unsigned long argument, bool add)
-{
+static long st_ioctl_program_update(unsigned long argument, bool add){
     struct st_program_request request;
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
     /* Il registro valida il nome, inclusa la terminazione NUL. */
-    return add ? st_program_registry_add(request.name)
-               : st_program_registry_remove(request.name);
+    return add ? st_program_registry_add(request.name) : st_program_registry_remove(request.name);
 }
 
-static long st_ioctl_program_add(unsigned long argument)
-{
+static long st_ioctl_program_add(unsigned long argument){
     return st_ioctl_program_update(argument, true);
 }
 
-static long st_ioctl_program_remove(unsigned long argument)
-{
+static long st_ioctl_program_remove(unsigned long argument){
     return st_ioctl_program_update(argument, false);
 }
 
-static long st_ioctl_syscall_update(unsigned long argument, bool add)
-{
+static long st_ioctl_syscall_update(unsigned long argument, bool add){
     struct st_syscall_request request;
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
         return -EFAULT;
-    return add ? st_syscall_registry_add(request.number)
-               : st_syscall_registry_remove(request.number);
+    return add ? st_syscall_registry_add(request.number) : st_syscall_registry_remove(request.number);
 }
 
-static long st_ioctl_syscall_add(unsigned long argument)
-{
+static long st_ioctl_syscall_add(unsigned long argument){
     return st_ioctl_syscall_update(argument, true);
 }
 
-static long st_ioctl_syscall_remove(unsigned long argument)
-{
+static long st_ioctl_syscall_remove(unsigned long argument){
     return st_ioctl_syscall_update(argument, false);
 }
 
-static long st_ioctl_uid_get_count(unsigned long argument)
-{
+static long st_ioctl_uid_get_count(unsigned long argument){
     struct st_uid_count response = { .count = st_uid_registry_count() };
 
-    return copy_to_user((void __user *)argument, &response, sizeof(response))
-        ? -EFAULT : 0;
+    return copy_to_user((void __user *)argument, &response, sizeof(response)) ? -EFAULT : 0;
 }
 
-static long st_ioctl_program_get_count(unsigned long argument)
-{
+static long st_ioctl_program_get_count(unsigned long argument){
     struct st_program_count response = { .count = st_program_registry_count() };
 
-    return copy_to_user((void __user *)argument, &response, sizeof(response))
-        ? -EFAULT : 0;
+    return copy_to_user((void __user *)argument, &response, sizeof(response)) ? -EFAULT : 0;
 }
 
-static long st_ioctl_syscall_get_count(unsigned long argument)
-{
+static long st_ioctl_syscall_get_count(unsigned long argument){
     struct st_syscall_count response = { .count = st_syscall_registry_count() };
 
-    return copy_to_user((void __user *)argument, &response, sizeof(response))
-        ? -EFAULT : 0;
+    return copy_to_user((void __user *)argument, &response, sizeof(response)) ? -EFAULT : 0;
 }
 
 enum st_list_kind { ST_LIST_UID, ST_LIST_PROGRAM, ST_LIST_SYSCALL };
@@ -190,14 +157,15 @@ enum st_list_kind { ST_LIST_UID, ST_LIST_PROGRAM, ST_LIST_SYSCALL };
 /* Alloca sul conteggio reale; snapshot e copie user-space restano separati.
  * ENOSPC comunica la dimensione richiesta anche se il registro cresce.
  */
-static long st_ioctl_list_reply(unsigned long argument, void *request, size_t request_size,
-    __u32 capacity, __u32 *count, __u64 user_items, enum st_list_kind kind)
-{
+static long st_ioctl_list_reply(unsigned long argument, void *request, size_t request_size, __u32 capacity, __u32 *count, __u64 user_items, enum st_list_kind kind){
     void *items = NULL;
     size_t item_size = kind == ST_LIST_PROGRAM ? sizeof(struct st_program_name) : sizeof(__u32);
-    __u32 actual = 0, required = kind == ST_LIST_UID ? st_uid_registry_count() :
-        kind == ST_LIST_PROGRAM ? st_program_registry_count() : st_syscall_registry_count();
-    int ret = -ENOSPC;
+    __u32 actual = 0;
+    __u32 required = kind == ST_LIST_UID ? st_uid_registry_count() :
+                 kind == ST_LIST_PROGRAM ? st_program_registry_count() :
+                 st_syscall_registry_count();
+
+int ret = -ENOSPC;
 
     *count = required;
     if (capacity < required)
@@ -226,8 +194,7 @@ out:
     return ret;
 }
 
-static long st_ioctl_uid_list(unsigned long argument)
-{
+static long st_ioctl_uid_list(unsigned long argument){
     struct st_uid_list_request request;
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
@@ -238,8 +205,7 @@ static long st_ioctl_uid_list(unsigned long argument)
         &request.count, request.uids_ptr, ST_LIST_UID);
 }
 
-static long st_ioctl_program_list(unsigned long argument)
-{
+static long st_ioctl_program_list(unsigned long argument){
     struct st_program_list_request request;
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
@@ -250,8 +216,7 @@ static long st_ioctl_program_list(unsigned long argument)
         &request.count, request.programs_ptr, ST_LIST_PROGRAM);
 }
 
-static long st_ioctl_syscall_list(unsigned long argument)
-{
+static long st_ioctl_syscall_list(unsigned long argument){
     struct st_syscall_list_request request;
 
     if (copy_from_user(&request, (void __user *)argument, sizeof(request)))
@@ -291,8 +256,7 @@ static const struct st_ioctl_entry st_ioctl_commands[] = {
     { ST_IOCTL_STATS_GET,         st_ioctl_stats_get,         false, false },
 };
 
-static const struct st_ioctl_entry *st_ioctl_find(unsigned int command)
-{
+static const struct st_ioctl_entry *st_ioctl_find(unsigned int command){
     size_t i;
 
     for (i = 0; i < ARRAY_SIZE(st_ioctl_commands); i++)
@@ -301,14 +265,11 @@ static const struct st_ioctl_entry *st_ioctl_find(unsigned int command)
     return NULL;
 }
 
-bool st_device_is_control_command(unsigned int command)
-{
+bool st_device_is_control_command(unsigned int command){
     return st_ioctl_find(command) != NULL;
 }
 
-long st_device_ioctl_dispatch(struct file *file, unsigned int command,
-                              unsigned long argument)
-{
+long st_device_ioctl_dispatch(struct file *file, unsigned int command, unsigned long argument){
     const struct st_ioctl_entry *entry = st_ioctl_find(command);
     long ret;
 

@@ -14,8 +14,6 @@ int st_program_registry_remove(const char *name);
 bool st_program_registry_contains(const char *name);
 unsigned int st_program_registry_count(void);
 
-int st_program_registry_snapshot(struct st_program_name *programs,
-                                 __u32 capacity,
-                                 __u32 *count);
+int st_program_registry_snapshot(struct st_program_name *programs, __u32 capacity, __u32 *count);
 
 #endif

@@ -12,8 +12,6 @@ int st_syscall_registry_remove(unsigned int number);
 bool st_syscall_registry_contains(unsigned int number);
 unsigned int st_syscall_registry_count(void);
 
-int st_syscall_registry_snapshot(__u32 *numbers,
-                                 __u32 capacity,
-                                 __u32 *count);
+int st_syscall_registry_snapshot(__u32 *numbers, __u32 capacity, __u32 *count);
 
 #endif

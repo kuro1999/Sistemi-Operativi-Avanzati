@@ -91,8 +91,7 @@ static struct st_hook_filter st_hook_filters[NR_syscalls];
 static size_t st_hook_filter_count;
 
 /* Gli slot impliciti restano associati a sys_ni_syscall. */
-static int st_hook_targets_prepare(void)
-{
+static int st_hook_targets_prepare(void){
     const struct st_syscall_definition *definition;
     struct st_hook_target *target;
     size_t index;
@@ -111,38 +110,30 @@ static int st_hook_targets_prepare(void)
         syscall_nr = definition->syscall_nr;
 
         if (syscall_nr >= ARRAY_SIZE(st_hook_targets)) {
-            pr_err("syscall_throttle: definizione syscall " "fuori range: nr=%u, limite=%zu\n", syscall_nr,
-                ARRAY_SIZE(st_hook_targets));
+            pr_err("syscall_throttle: definizione syscall " "fuori range: nr=%u, limite=%zu\n", syscall_nr, ARRAY_SIZE(st_hook_targets));
             return -EINVAL;
         }
-
         target = &st_hook_targets[syscall_nr];
 
         if (target->explicit_entry) {
             pr_err("syscall_throttle: definizione syscall " "duplicata: nr=%u\n", syscall_nr);
             return -EINVAL;
         }
-
         target->symbol_name = definition->symbol_name;
         target->nonreturning = definition->nonreturning;
         target->explicit_entry = true;
     }
-
     return 0;
 }
 
-static int st_resolve_symbol(const char *symbol_name, unsigned long *original_ip)
-{
-    struct kprobe probe = {
-        .symbol_name = symbol_name,
-    };
+static int st_resolve_symbol(const char *symbol_name, unsigned long *original_ip){
+    struct kprobe probe = {.symbol_name = symbol_name};
     int ret;
 
     *original_ip = 0U;
     ret = register_kprobe(&probe);
     if (ret != 0) {
-        pr_err("syscall_throttle: impossibile risolvere %s " "tramite Kprobe: errore=%d\n", symbol_name,
-            ret);
+        pr_err("syscall_throttle: impossibile risolvere %s " "tramite Kprobe: errore=%d\n", symbol_name, ret);
         return ret;
     }
 
@@ -153,13 +144,11 @@ static int st_resolve_symbol(const char *symbol_name, unsigned long *original_ip
         pr_err("syscall_throttle: indirizzo nullo per %s\n", symbol_name);
         return -ENOENT;
     }
-
     return 0;
 }
 
 /* Riusa i simboli gia risolti, inclusa la fallback sys_ni_syscall. */
-static int st_resolve_all_targets(void)
-{
+static int st_resolve_all_targets(void){
     struct st_hook_target *target;
     const struct st_hook_target *previous;
     size_t syscall_nr;
@@ -182,22 +171,18 @@ static int st_resolve_all_targets(void)
             if (strcmp(target->symbol_name, previous->symbol_name) != 0)
                 continue;
 
-            if (previous->original_ip == 0U) {
-                pr_err("syscall_throttle: indirizzo precedente " "nullo per syscall=%zu, simbolo=%s\n",
-                    previous_nr, previous->symbol_name);
+            if (previous->original_ip == 0U){
+                pr_err("syscall_throttle: indirizzo precedente " "nullo per syscall=%zu, simbolo=%s\n", previous_nr, previous->symbol_name);
                 return -EINVAL;
             }
-
             target->original_ip = previous->original_ip;
             break;
         }
-
         if (previous_nr < syscall_nr)
             continue;
         ret = st_resolve_symbol(target->symbol_name, &target->original_ip);
         if (ret != 0) {
-            pr_err("syscall_throttle: risoluzione fallita " "per syscall=%zu, simbolo=%s\n", syscall_nr,
-                target->symbol_name);
+            pr_err("syscall_throttle: risoluzione fallita " "per syscall=%zu, simbolo=%s\n", syscall_nr, target->symbol_name);
             return ret;
         }
     }
@@ -206,8 +191,7 @@ static int st_resolve_all_targets(void)
 }
 
 /* Deduplica per indirizzo: anche simboli diversi possono essere alias. */
-static int st_hook_filters_build(void)
-{
+static int st_hook_filters_build(void){
     const struct st_hook_target *target;
     struct st_hook_filter *filter;
     size_t syscall_nr;
@@ -220,8 +204,7 @@ static int st_hook_filters_build(void)
         target = &st_hook_targets[syscall_nr];
 
         if (target->original_ip == 0U) {
-            pr_err("syscall_throttle: target non risolto " "per syscall=%zu, simbolo=%s\n", syscall_nr,
-                target->symbol_name);
+            pr_err("syscall_throttle: target non risolto " "per syscall=%zu, simbolo=%s\n", syscall_nr, target->symbol_name);
             return -EINVAL;
         }
 
@@ -248,14 +231,11 @@ static int st_hook_filters_build(void)
         pr_err("syscall_throttle: nessun filtro " "Ftrace costruito\n");
         return -EINVAL;
     }
-
     return 0;
 }
 
-static void st_hook_runtime_clear(void)
-{
+static void st_hook_runtime_clear(void){
     memset(st_hook_targets, 0, sizeof(st_hook_targets));
-
     memset(st_hook_filters, 0, sizeof(st_hook_filters));
     st_hook_filter_count = 0U;
 }
@@ -293,9 +273,7 @@ static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *
     unsigned long original_ip);
 
 /* Contesto Ftrace: solo controlli non bloccanti, senza attese. */
-static void notrace st_ftrace_callback(unsigned long ip, unsigned long parent_ip, struct ftrace_ops *ops,
-    struct ftrace_regs *fregs)
-{
+static void notrace st_ftrace_callback(unsigned long ip, unsigned long parent_ip, struct ftrace_ops *ops, struct ftrace_regs *fregs){
     struct pt_regs *kernel_regs;
     struct pt_regs *syscall_regs;
     unsigned long first_argument;
@@ -359,9 +337,7 @@ static struct ftrace_ops st_syscall_ftrace_ops = {
 
 /* La tabella resta immutabile fino all'azzeramento di active_calls. */
 
-static const struct st_hook_target * st_hook_target_find(unsigned int syscall_nr,
-    unsigned long original_ip)
-{
+static const struct st_hook_target * st_hook_target_find(unsigned int syscall_nr, unsigned long original_ip){
     const struct st_hook_target *target;
 
     if (syscall_nr >= ARRAY_SIZE(st_hook_targets))
@@ -376,9 +352,7 @@ static const struct st_hook_target * st_hook_target_find(unsigned int syscall_nr
     return target;
 }
 
-static asmlinkage long notrace st_call_original_syscall(const struct st_hook_target *target,
-    st_x64_syscall_t original_syscall, const struct pt_regs *regs, bool *release_active_call)
-{
+static asmlinkage long notrace st_call_original_syscall(const struct st_hook_target *target,st_x64_syscall_t original_syscall, const struct pt_regs *regs, bool *release_active_call){
     struct st_nonreturning_call call;
     long result;
 
@@ -404,9 +378,7 @@ static asmlinkage long notrace st_call_original_syscall(const struct st_hook_tar
 }
 
 /* Policy: monitor ON && syscall registrata && (EUID registrato || programma registrato). */
-static bool st_syscall_is_relevant(unsigned int syscall_nr, char *program_name,
-    size_t program_name_capacity, bool *program_name_valid)
-{
+static bool st_syscall_is_relevant(unsigned int syscall_nr, char *program_name, size_t program_name_capacity, bool *program_name_valid){
     int identity_ret;
 
     if (program_name_valid != NULL)
@@ -442,21 +414,18 @@ static bool st_syscall_is_relevant(unsigned int syscall_nr, char *program_name,
 }
 
 /* Rivaluta a ogni iterazione senza sovrascrivere il nome della prima classificazione. */
-static bool st_syscall_policy_still_matches(unsigned int syscall_nr)
-{
+static bool st_syscall_policy_still_matches(unsigned int syscall_nr){
     char name[ST_PROGRAM_NAME_CAPACITY];
 
     return st_syscall_is_relevant(syscall_nr, name, sizeof(name), NULL);
 }
 
-static void notrace st_hook_active_call_put(void)
-{
+static void notrace st_hook_active_call_put(void){
     if (atomic_dec_and_test(&st_hook_active_calls))
         wake_up_all(&st_hook_active_wait_queue);
 }
 
-static void notrace st_nonreturning_call_track(struct st_nonreturning_call *call)
-{
+static void notrace st_nonreturning_call_track(struct st_nonreturning_call *call){
     unsigned long flags;
 
     INIT_LIST_HEAD(&call->link);
@@ -471,8 +440,7 @@ static void notrace st_nonreturning_call_track(struct st_nonreturning_call *call
 }
 
 /* Ritorno inatteso: true solo se il wrapper possiede ancora il record. */
-static bool notrace st_nonreturning_call_cancel(struct st_nonreturning_call *call)
-{
+static bool notrace st_nonreturning_call_cancel(struct st_nonreturning_call *call){
     unsigned long flags;
     bool removed;
 
@@ -490,9 +458,7 @@ static bool notrace st_nonreturning_call_cancel(struct st_nonreturning_call *cal
 }
 
 /* Il task in uscita non tornera al wrapper: il tracepoint rilascia active_calls. */
-static void notrace st_sched_process_exit_callback(void *ignore, struct task_struct *task,
-    bool group_dead)
-{
+static void notrace st_sched_process_exit_callback(void *ignore, struct task_struct *task, bool group_dead){
     struct st_nonreturning_call *call;
     struct st_nonreturning_call *next;
     unsigned long flags;
@@ -512,7 +478,6 @@ static void notrace st_sched_process_exit_callback(void *ignore, struct task_str
         completed = true;
         break;
     }
-
     spin_unlock_irqrestore(&st_nonreturning_calls_lock, flags);
 
     if (!completed)
@@ -522,8 +487,7 @@ static void notrace st_sched_process_exit_callback(void *ignore, struct task_str
     st_hook_active_call_put();
 }
 
-static void st_find_sched_process_exit_tracepoint(struct tracepoint *tracepoint, void *private_data)
-{
+static void st_find_sched_process_exit_tracepoint(struct tracepoint *tracepoint, void *private_data){
     struct tracepoint **result;
 
     result = private_data;
@@ -535,8 +499,7 @@ static void st_find_sched_process_exit_tracepoint(struct tracepoint *tracepoint,
         *result = tracepoint;
 }
 
-static int st_nonreturning_tracepoint_init(void)
-{
+static int st_nonreturning_tracepoint_init(void){
     int ret;
 
     if (st_sched_process_exit_registered)
@@ -565,8 +528,7 @@ static int st_nonreturning_tracepoint_init(void)
     return 0;
 }
 
-static void st_nonreturning_tracepoint_exit(void)
-{
+static void st_nonreturning_tracepoint_exit(void){
     int ret;
 
     if (!st_sched_process_exit_registered)
@@ -585,9 +547,7 @@ static void st_nonreturning_tracepoint_exit(void)
     pr_info("syscall_throttle: tracepoint " "sched_process_exit rimosso\n");
 }
 
-static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *regs,
-    unsigned long original_ip)
-{
+static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *regs, unsigned long original_ip){
     struct st_statistics_block_context statistics_context;
 
     enum st_rate_limiter_decision decision;
@@ -736,8 +696,7 @@ out:
     return result;
 }
 
-static size_t st_hook_filters_remove(const char *phase)
-{
+static size_t st_hook_filters_remove(const char *phase){
     size_t index;
     size_t removed = 0U;
     int ret;
@@ -761,8 +720,7 @@ static size_t st_hook_filters_remove(const char *phase)
     return removed;
 }
 
-int st_syscall_hook_init(void)
-{
+int st_syscall_hook_init(void){
     struct st_hook_filter *filter;
     size_t filter_index;
     size_t syscall_nr;
@@ -844,8 +802,7 @@ fail_clear_state:
     return ret;
 }
 
-void st_syscall_hook_exit(void)
-{
+void st_syscall_hook_exit(void){
     size_t removed_filter_count;
     int unregister_ret;
 

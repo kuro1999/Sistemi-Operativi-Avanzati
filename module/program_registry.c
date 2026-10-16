@@ -18,13 +18,11 @@ static LIST_HEAD(st_program_entries);
 static DECLARE_RWSEM(st_program_registry_lock);
 static unsigned int st_program_entries_count;
 
-static int st_program_name_validate(const char *name)
-{
+static int st_program_name_validate(const char *name){
     size_t length;
 
     if (name == NULL)
         return -EINVAL;
-
     /*
      * strnlen() non legge oltre la capacità massima.
      *
@@ -33,11 +31,9 @@ static int st_program_name_validate(const char *name)
      */
     length = strnlen(name, ST_PROGRAM_NAME_CAPACITY);
 
-    if (length == 0U ||
-        length >= ST_PROGRAM_NAME_CAPACITY) {
+    if (length == 0U || length >= ST_PROGRAM_NAME_CAPACITY) {
         return -EINVAL;
     }
-
     /*
      * Il registro conserva esclusivamente il basename, non un
      * percorso completo o relativo.
@@ -50,8 +46,7 @@ static int st_program_name_validate(const char *name)
 
 /* Richiede il lock del registro in lettura o scrittura.
  * Il puntatore restituito resta protetto solo finche' il lock e' acquisito. */
-static struct st_program_entry *st_program_find_locked(const char *name)
-{
+static struct st_program_entry *st_program_find_locked(const char *name){
     struct st_program_entry *entry;
 
     list_for_each_entry(entry, &st_program_entries, node)
@@ -60,38 +55,30 @@ static struct st_program_entry *st_program_find_locked(const char *name)
     return NULL;
 }
 
-void st_program_registry_init(void)
-{
+void st_program_registry_init(void){
     INIT_LIST_HEAD(&st_program_entries);
     st_program_entries_count = 0U;
 
     pr_info("syscall_throttle: registro programmi inizializzato\n");
 }
 
-void st_program_registry_exit(void)
-{
+void st_program_registry_exit(void){
     struct st_program_entry *entry;
     struct st_program_entry *next;
 
     down_write(&st_program_registry_lock);
 
-    list_for_each_entry_safe(entry,
-                             next,
-                             &st_program_entries,
-                             node) {
+    list_for_each_entry_safe(entry, next, &st_program_entries, node) {
         list_del(&entry->node);
         kfree(entry);
     }
 
     st_program_entries_count = 0U;
-
     up_write(&st_program_registry_lock);
-
     pr_info("syscall_throttle: registro programmi rilasciato\n");
 }
 
-int st_program_registry_add(const char *name)
-{
+int st_program_registry_add(const char *name){
     struct st_program_entry *new_entry;
     int ret;
 
@@ -107,9 +94,7 @@ int st_program_registry_add(const char *name)
      * La validazione precedente garantisce che il nome sia
      * terminato entro la capacità disponibile.
      */
-    strscpy(new_entry->name,
-            name,
-            sizeof(new_entry->name));
+    strscpy(new_entry->name, name, sizeof(new_entry->name));
 
     down_write(&st_program_registry_lock);
 
@@ -127,8 +112,7 @@ int st_program_registry_add(const char *name)
     return 0;
 }
 
-int st_program_registry_remove(const char *name)
-{
+int st_program_registry_remove(const char *name){
     struct st_program_entry *removed_entry;
     int ret;
 
@@ -153,26 +137,20 @@ int st_program_registry_remove(const char *name)
     return 0;
 }
 
-bool st_program_registry_contains(const char *name)
-{
+bool st_program_registry_contains(const char *name){
     bool found;
 
     if (st_program_name_validate(name) != 0)
         return false;
 
     down_read(&st_program_registry_lock);
-
     found = st_program_find_locked(name) != NULL;
-
     up_read(&st_program_registry_lock);
 
     return found;
 }
 
-int st_program_registry_snapshot(struct st_program_name *programs,
-                                 __u32 capacity,
-                                 __u32 *count)
-{
+int st_program_registry_snapshot(struct st_program_name *programs, __u32 capacity, __u32 *count){
     struct st_program_entry *entry;
     __u32 required;
     __u32 index = 0U;
@@ -185,7 +163,6 @@ int st_program_registry_snapshot(struct st_program_name *programs,
         return -EINVAL;
 
     down_read(&st_program_registry_lock);
-
     required = (__u32)st_program_entries_count;
     *count = required;
 
@@ -204,11 +181,7 @@ int st_program_registry_snapshot(struct st_program_name *programs,
          * evitando di esporre dati residui della memoria kernel.
          */
         memset(&programs[index], 0, sizeof(programs[index]));
-
-        copied = strscpy(programs[index].name,
-                         entry->name,
-                         sizeof(programs[index].name));
-
+        copied = strscpy(programs[index].name, entry->name, sizeof(programs[index].name));
         /*
          * Non dovrebbe accadere perché i nomi presenti nel
          * registro sono già stati validati all'inserimento.
@@ -217,16 +190,13 @@ int st_program_registry_snapshot(struct st_program_name *programs,
             up_read(&st_program_registry_lock);
             return -EOVERFLOW;
         }
-
         index++;
     }
-
     up_read(&st_program_registry_lock);
     return 0;
 }
 
-unsigned int st_program_registry_count(void)
-{
+unsigned int st_program_registry_count(void){
     unsigned int count;
 
     down_read(&st_program_registry_lock);
