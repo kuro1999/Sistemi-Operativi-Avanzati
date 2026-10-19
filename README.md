@@ -71,12 +71,12 @@ allo stesso criterio; il basename non costituisce una barriera di sicurezza.
 | `module/*.h` | Interfacce interne dei componenti |
 | `user/syscall_throttle.h` | Tipi e comandi condivisi tra kernel e user-space |
 | `user/stctl.c` | Parsing, ioctl e visualizzazione |
-| `demo/` | Demo automatica C: controller, worker, protocollo e Makefile |
+| `demo/` | Tre script bash, supporto comune e worker C |
 
 Il Makefile nella radice coordina quelli di `module/`, `user/` e `demo/`.
 Le tre directory del progetto sono `module/`, `user/` e `demo/`.
 L'header `user/syscall_throttle.h` definisce l'interfaccia condivisa: viene
-incluso dal modulo, dal controller e dalla demo.
+incluso dal modulo e dal controller; gli script della demo utilizzano l’interfaccia tramite user/stctl.
 
 ```mermaid
 flowchart TD
@@ -127,7 +127,7 @@ implementata una politica FIFO né una garanzia di ordine fra i waiter.
 | `st_syscall_bitmap` | Un bit per numero, dimensionato con `NR_syscalls` |
 | Conteggi dei registri | Numero di elementi; aggiornati insieme al relativo registro |
 | `st_monitor_enabled_key` | Static key del monitor |
-| `st_ioctl_entry` | Comando, handler, privilegio richiesto e serializzazione della policy |
+| `st_ioctl_entry` | Comando, handler, privilegio richiesto e flag di notifica delle modifiche alla policy |
 
 UID e programmi hanno helper `find_locked` comuni ad aggiunta, rimozione e
 ricerca. Il chiamante mantiene il lock. Nel registro syscall gli aggiornamenti
@@ -163,8 +163,6 @@ individuali o numero della syscall del peak.
 | `st_nonreturning_call` | Record del task per completare il lifetime di exit/exit_group |
 | `registry_info` | Metadati per consultazione e stampa dei registri nella CLI |
 | `command` | Tabella dei comandi della CLI |
-| `worker` (demo) | PID, descriptor e risultato dei processi di prova |
-| `demo_result` (demo) | Messaggi READY/RESULT, esito e tempi della syscall |
 
 `st_hook_active_calls`, la sua wait queue e i riferimenti al modulo proteggono
 l'esecuzione durante lo scaricamento. I tre contatori diagnostici nonreturning
@@ -199,7 +197,7 @@ Una syscall originale già ammessa e bloccata non impedisce il rinnovo del budge
 
 ## Statistiche
 
-La media richiesta è una media temporale:
+Il progetto calcola il numero medio di thread bloccati come media temporale:
 
 ```text
 media thread bloccati = blocked_thread_time_ns / observation_ns
@@ -222,8 +220,9 @@ senza attesa può lasciare il peak non disponibile. Non esiste reset manuale.
 
 ## Concorrenza e ciclo di vita
 
-- Il mutex di policy serializza le transizioni amministrative; i registri hanno
-  lock propri. Le modifiche notificano il limiter per rivalutare i waiter.
+- Il mutex di policy serializza ENABLE, DISABLE e MAX_SET.
+  Le aggiunte e rimozioni nei registri usano i rispettivi lock e,
+  se riuscite, notificano il limiter per rivalutare i waiter.
 - La generazione del limiter collega matching, acquisizione e attesa, evitando
   di addormentarsi su uno stato già superato.
 - I timestamp contabili sono acquisiti sotto il lock delle statistiche.
@@ -250,11 +249,16 @@ e `SA_RESTART`.
 `exit` e `exit_group` usano record associati al task e il tracepoint
 `sched_process_exit` per rilasciare la protezione quando il wrapper non ritorna.
 
-`delete_module` acquisisce un riferimento al monitor anche fuori dal matching.
-L'autorimozione ordinaria intercettata viene normalmente rifiutata con
-EWOULDBLOCK; se il riferimento non può essere acquisito il wrapper restituisce
-EBUSY. `O_TRUNC` è rifiutato con EPERM nel percorso intercettato, anche fuori
-policy: è una restrizione esplicita rispetto alla syscall originale.
+Quando delete_module entra nel wrapper, viene acquisito un riferimento al
+modulo anche se programma ed EUID non sono registrati. L'intercettazione
+richiede comunque monitor ON e numero di syscall registrato.
+
+Se il riferimento non può essere acquisito, il wrapper restituisce EBUSY.
+Nel percorso intercettato O_TRUNC viene rifiutato con EPERM, dopo l'eventuale
+attesa del limiter, indipendentemente dal modulo indicato nella richiesta.
+
+Nelle condizioni della demo, la rimozione di syscall_throttle con O_NONBLOCK
+è attesa fallire con EWOULDBLOCK perché il riferimento al modulo è attivo.
 
 ## Device, permessi e UAPI
 
@@ -277,9 +281,8 @@ La CLI limita i retry in caso di crescita concorrente. I percorsi per liste
 inizialmente vuote differiscono ancora tra registri; non si presume un unico
 istante di osservazione fra COUNT e LIST.
 
-I numeri ioctl 0x00, 0x50 e 0x51 sono ritirati. STATS_GET usa 0x52; il codice
-completo include la dimensione della struttura. Ricompilare modulo, controller
-e demo dalla stessa versione dopo modifiche dell'UAPI.
+STATS_GET usa 0x52; il codice
+completo include la dimensione della struttura. Ricompilare modulo e controller dalla stessa versione dopo modifiche dell’UAPI.
 
 ## Controller
 
@@ -287,7 +290,6 @@ I comandi si eseguono come `./user/stctl <comando>`.
 
 | Comando CLI | Ioctl (`ST_IOCTL_` + suffisso) | Root |
 |---|---|---|
-| `status` | GET_STATUS | No |
 | `enable` / `disable` | ENABLE / DISABLE | Sì |
 | `max-set <valore>` / `max-get` | MAX_SET / MAX_GET | Solo SET |
 | `uid-add <UID>` / `uid-remove <UID>` | UID_ADD / UID_REMOVE | Sì |
@@ -302,20 +304,31 @@ Nomi: basename non vuoto, senza slash e lungo al massimo 255 byte. Numeri syscal
 intervallo derivato da `NR_syscalls` degli header di compilazione. L'aggiunta di un
 elemento presente restituisce EEXIST; la rimozione di un elemento assente ENOENT.
 Validazioni e privilegi sono controllati anche dal driver, indipendentemente
-dalla CLI. Non sono disponibili comandi `ping`, `stats-reset` o selezione FIFO.
+dalla CLI.
 
 ## Compilazione e demo
 
-Richiesti Linux x86-64 nativo, compilatore C, make, header del kernel in esecuzione,
-`sudo` e `/proc`. Eseguire i comandi dalla radice del repository come utente
-normale, senza `sudo` davanti a `make`.
+Ambiente utilizzato:
+- Distribuzione: Ubuntu 24.04.3 LTS (Noble Numbat).
+- Kernel: `7.0.0-38-generic`.
+
+La compatibilità con altre versioni del kernel non è stata verificata.
+
+Richiesti Linux x86-64 nativo, compilatore C, make e header compatibili
+con il kernel in esecuzione. Il modulo utilizza Kprobes, Ftrace con
+salvataggio dei registri e modifica dell'instruction pointer, e il
+tracepoint sched_process_exit.
+
+Per eseguire la demo servono Bash, sudo, gli strumenti insmod/rmmod,
+timeout, awk e le comuni utility di sistema, con /sys montato.
+Eseguire i comandi come utente normale, senza sudo davanti a make.
 
 | Comando | Operazione |
 |---|---|
 | `make` oppure `make load` | Compila modulo e controller, poi carica il modulo se assente |
 | `make build` | Compila soltanto modulo e controller |
 | `make unload` | Compila il controller se necessario, disattiva il monitor e scarica il modulo |
-| `make demo` | Compila tutto, carica il modulo, esegue la demo e lo scarica dopo il successo |
+| `make demo` | Compila modulo, controller e worker; esegue tre fasi, ciascuna con caricamento iniziale e scaricamento finale del modulo in caso di successo |
 | `make clean` | Elimina gli artefatti di compilazione delle tre cartelle, senza scaricare il modulo |
 
 Per l'uso manuale:
@@ -326,8 +339,8 @@ sudo ./user/stctl max-set 5
 ./user/stctl max-get
 ```
 
-Un nuovo caricamento lascia il monitor OFF, pronto per registrazioni e
-configurazione. Impostare MAX non attiva il monitor. Se il modulo è già caricato,
+Un nuovo caricamento lascia il monitor OFF, i registri vuoti e MAX=0.
+Impostare MAX non attiva il monitor. Se il modulo è già caricato,
 `make` conserva la configurazione e il codice in memoria: per caricare il codice
 ricompilato usare `make unload` seguito da `make`.
 
@@ -337,19 +350,26 @@ Per la demo, con modulo inizialmente scaricato e senza altre prove in parallelo:
 make demo
 ```
 
-Si può anche entrare in `demo/` ed eseguire `make`. `make build` compila
-modulo, controller e worker senza avviare le prove.
+Dalla radice, `make -C demo` compila ed esegue le tre fasi.
+`make -C demo build` compila modulo, controller e i due eseguibili
+demo_worker e demo_alt senza avviare le prove.
 
-La demo e' una sequenza dimostrativa: tre script Bash configurano il modulo
-tramite `user/stctl`, avviano piccoli programmi e mostrano risultati e statistiche.
-Non e' una suite completa di test automatici: "completata" indica che la sequenza
-ha terminato senza errori di esecuzione, non la verifica numerica di ogni proprieta'.
+## Verifiche della demo
+
+La demo combina osservazione dei tempi e delle statistiche con alcuni
+controlli automatici, tra cui il rifiuto di una modifica non privilegiata
+e lo stato 42 per exit ed exit_group.
+
+Il messaggio finale indica il completamento delle tre fasi e dei controlli
+presenti; non certifica tutte le proprietà del modulo. In particolare,
+i tempi e gli errno delle prove delete_module vengono mostrati ma non
+confrontati automaticamente con i risultati attesi.
 
 | Script | Operazioni mostrate |
 |---|---|
 | `demo/fase1.sh` | Registri, letture non privilegiate, modifica rifiutata senza root, selezione per programma e per EUID, bypass OFF e syscall non registrata. |
 | `demo/fase2.sh` | Budget condiviso fra processi e syscall; statistiche durante le attese con MAX=0 e rilascio tramite OFF. |
-| `demo/fase3.sh` | Due read su pipe con OFF/ON, exit ed exit_group con stato 42, rifiuti di delete_module sul modulo reale e scaricamento ordinario. |
+| `demo/fase3.sh` | Due read su pipe con OFF/ON, exit ed exit_group con stato 42, richieste delete_module con visualizzazione dei rifiuti attesi e scaricamento ordinario. |
 
 Per eseguire una sola fase, dopo `make -C demo build`, usare ad esempio
 `bash demo/fase2.sh`. Eseguire come utente normale, con sudo disponibile e modulo
@@ -359,7 +379,7 @@ prova a disattivare il monitor e lascia il modulo caricato per l'ispezione.
 Non eseguire altri test o controller in parallelo.
 
 `demo/worker.c` genera `demo_worker` e `demo_alt`, due basename distinti per
-mostrare la selezione per eseguibile. Stampa tempi e risultati delle syscall;
+mostrare la selezione per eseguibile. Mostra i tempi delle chiamate e gli esiti delle prove;
 la prova pipe usa due piccoli file temporanei per partire dopo l'attivazione del
 monitor, evitando che le read del loader consumino il budget. I file vengono
 rimossi al termine. I tempi comprendono scheduling e overhead: sulla VM possono
