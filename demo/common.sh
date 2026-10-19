@@ -8,7 +8,7 @@ WORKER="$DEMO_DIR/demo_worker"
 ALT="$DEMO_DIR/demo_alt"
 DEMO_UID="$(id -u)"
 
-ctl() { sudo -n "$CTL" "$@" >/dev/null; }
+ctl() { sudo -n "$CTL" "$@" </dev/null >/dev/null; }
 run_worker() { timeout --kill-after=2s 12s "$@"; }
 
 cleanup() {
