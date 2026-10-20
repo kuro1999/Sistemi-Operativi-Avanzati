@@ -100,9 +100,6 @@ static int st_hook_targets_prepare(void){
     for (index = 0; index < ARRAY_SIZE(st_hook_targets); index++) {
         target = &st_hook_targets[index];
         target->symbol_name = "__x64_sys_ni_syscall";
-        target->original_ip = 0U;
-        target->nonreturning = false;
-        target->explicit_entry = false;
     }
 
     for (index = 0; index < ARRAY_SIZE(st_syscall_definitions); index++) {
@@ -147,88 +144,56 @@ static int st_resolve_symbol(const char *symbol_name, unsigned long *original_ip
     return 0;
 }
 
-/* Riusa i simboli gia risolti, inclusa la fallback sys_ni_syscall. */
-static int st_resolve_all_targets(void){
+/* Dopo runtime_clear e targets_prepare: risolve i simboli e deduplica i filtri. */
+static int st_hook_targets_resolve(void){
     struct st_hook_target *target;
     const struct st_hook_target *previous;
     size_t syscall_nr;
     size_t previous_nr;
+    size_t filter_index;
     int ret;
 
     for (syscall_nr = 0; syscall_nr < ARRAY_SIZE(st_hook_targets); syscall_nr++) {
         target = &st_hook_targets[syscall_nr];
-
         if (target->symbol_name == NULL) {
-            pr_err("syscall_throttle: simbolo assente " "per syscall=%zu\n", syscall_nr);
+            pr_err("syscall_throttle: simbolo assente per syscall=%zu\n", syscall_nr);
             return -EINVAL;
         }
 
-        target->original_ip = 0U;
-
+        /* Stesso simbolo: riusa l'indirizzo senza registrare un'altra Kprobe. */
         for (previous_nr = 0; previous_nr < syscall_nr; previous_nr++) {
             previous = &st_hook_targets[previous_nr];
-
-            if (strcmp(target->symbol_name, previous->symbol_name) != 0)
-                continue;
-
-            if (previous->original_ip == 0U){
-                pr_err("syscall_throttle: indirizzo precedente " "nullo per syscall=%zu, simbolo=%s\n", previous_nr, previous->symbol_name);
-                return -EINVAL;
+            if (strcmp(target->symbol_name, previous->symbol_name) == 0) {
+                target->original_ip = previous->original_ip;
+                break;
             }
-            target->original_ip = previous->original_ip;
-            break;
         }
-        if (previous_nr < syscall_nr)
-            continue;
-        ret = st_resolve_symbol(target->symbol_name, &target->original_ip);
-        if (ret != 0) {
-            pr_err("syscall_throttle: risoluzione fallita " "per syscall=%zu, simbolo=%s\n", syscall_nr, target->symbol_name);
-            return ret;
+        if (previous_nr == syscall_nr) {
+            ret = st_resolve_symbol(target->symbol_name, &target->original_ip);
+            if (ret != 0)
+                return ret;
         }
-    }
-
-    return 0;
-}
-
-/* Deduplica per indirizzo: anche simboli diversi possono essere alias. */
-static int st_hook_filters_build(void){
-    const struct st_hook_target *target;
-    struct st_hook_filter *filter;
-    size_t syscall_nr;
-    size_t filter_index;
-
-    memset(st_hook_filters, 0, sizeof(st_hook_filters));
-    st_hook_filter_count = 0U;
-
-    for (syscall_nr = 0; syscall_nr < ARRAY_SIZE(st_hook_targets); syscall_nr++) {
-        target = &st_hook_targets[syscall_nr];
-
         if (target->original_ip == 0U) {
-            pr_err("syscall_throttle: target non risolto " "per syscall=%zu, simbolo=%s\n", syscall_nr, target->symbol_name);
+            pr_err("syscall_throttle: indirizzo nullo per syscall=%zu, simbolo=%s\n", syscall_nr, target->symbol_name);
             return -EINVAL;
         }
 
+        /* Anche simboli diversi possono condividere lo stesso indirizzo. */
         for (filter_index = 0; filter_index < st_hook_filter_count; filter_index++) {
             if (st_hook_filters[filter_index].original_ip == target->original_ip)
                 break;
         }
         if (filter_index < st_hook_filter_count)
             continue;
-
         if (st_hook_filter_count >= ARRAY_SIZE(st_hook_filters)) {
-            pr_err("syscall_throttle: capacitÃ  filtri " "Ftrace esaurita\n");
+            pr_err("syscall_throttle: capacita' filtri Ftrace esaurita\n");
             return -ENOSPC;
         }
-
-        filter = &st_hook_filters[st_hook_filter_count];
-        filter->original_ip = target->original_ip;
-        filter->installed = false;
-
-        st_hook_filter_count++;
+        st_hook_filters[st_hook_filter_count++].original_ip = target->original_ip;
     }
 
     if (st_hook_filter_count == 0U) {
-        pr_err("syscall_throttle: nessun filtro " "Ftrace costruito\n");
+        pr_err("syscall_throttle: nessun filtro Ftrace costruito\n");
         return -EINVAL;
     }
     return 0;
@@ -255,12 +220,6 @@ static DEFINE_SPINLOCK(st_nonreturning_calls_lock);
 static struct tracepoint * st_sched_process_exit_tracepoint;
 
 static bool st_sched_process_exit_registered;
-
-static atomic64_t st_nonreturning_started = ATOMIC64_INIT(0);
-
-static atomic64_t st_nonreturning_completed = ATOMIC64_INIT(0);
-
-static atomic64_t st_nonreturning_unexpected_returns = ATOMIC64_INIT(0);
 
 static void notrace st_nonreturning_call_track(struct st_nonreturning_call *call);
 
@@ -367,8 +326,6 @@ static asmlinkage long notrace st_call_original_syscall(const struct st_hook_tar
     st_nonreturning_call_track(&call);
     result = original_syscall(regs);
 
-    atomic64_inc(&st_nonreturning_unexpected_returns);
-
     /* Se il tracepoint ha gia rimosso il record, ha anche rilasciato active_calls. */
     if (!st_nonreturning_call_cancel(&call))
         *release_active_call = false;
@@ -436,7 +393,6 @@ static void notrace st_nonreturning_call_track(struct st_nonreturning_call *call
     list_add_tail(&call->link, &st_nonreturning_calls);
 
     spin_unlock_irqrestore(&st_nonreturning_calls_lock, flags);
-    atomic64_inc(&st_nonreturning_started);
 }
 
 /* Ritorno inatteso: true solo se il wrapper possiede ancora il record. */
@@ -482,7 +438,6 @@ static void notrace st_sched_process_exit_callback(void *ignore, struct task_str
 
     if (!completed)
         return;
-    atomic64_inc(&st_nonreturning_completed);
 
     st_hook_active_call_put();
 }
@@ -524,7 +479,6 @@ static int st_nonreturning_tracepoint_init(void){
 
     st_sched_process_exit_registered = true;
 
-    pr_info("syscall_throttle: tracepoint " "sched_process_exit registrato\n");
     return 0;
 }
 
@@ -543,8 +497,6 @@ static void st_nonreturning_tracepoint_exit(void){
     tracepoint_synchronize_unregister();
     st_sched_process_exit_registered = false;
     st_sched_process_exit_tracepoint = NULL;
-
-    pr_info("syscall_throttle: tracepoint " "sched_process_exit rimosso\n");
 }
 
 static asmlinkage long notrace st_generic_syscall_wrapper(const struct pt_regs *regs, unsigned long original_ip){
@@ -696,9 +648,8 @@ out:
     return result;
 }
 
-static size_t st_hook_filters_remove(const char *phase){
+static void st_hook_filters_remove(const char *phase){
     size_t index;
-    size_t removed = 0U;
     int ret;
 
     for (index = 0; index < st_hook_filter_count; index++) {
@@ -708,24 +659,16 @@ static size_t st_hook_filters_remove(const char *phase){
             continue;
         ret = ftrace_set_filter_ip(&st_syscall_ftrace_ops, filter->original_ip, 1, 0);
         if (ret != 0) {
-            pr_err("syscall_throttle: %s filtro indice=%zu, " "indirizzo=%px fallito: errore=%d\n", phase,
-                index, (void *)filter->original_ip, ret);
-        } else {
-            removed++;
+            pr_err("syscall_throttle: %s filtro indice=%zu, " "indirizzo=%px fallito: errore=%d\n", phase, index, (void *)filter->original_ip, ret);
         }
 
         filter->installed = false;
     }
-
-    return removed;
 }
 
 int st_syscall_hook_init(void){
     struct st_hook_filter *filter;
     size_t filter_index;
-    size_t syscall_nr;
-    size_t explicit_count;
-    size_t nonreturning_count;
     int ret;
 
     if (READ_ONCE(st_hook_installed))
@@ -734,9 +677,6 @@ int st_syscall_hook_init(void){
     if (WARN_ON(!list_empty(&st_nonreturning_calls)))
         return -EBUSY;
     atomic_set(&st_hook_active_calls, 0);
-    atomic64_set(&st_nonreturning_started, 0);
-    atomic64_set(&st_nonreturning_completed, 0);
-    atomic64_set(&st_nonreturning_unexpected_returns, 0);
     WRITE_ONCE(st_hook_accepting_calls, false);
     WRITE_ONCE(st_hook_installed, false);
 
@@ -747,10 +687,7 @@ int st_syscall_hook_init(void){
     ret = st_nonreturning_tracepoint_init();
     if (ret != 0)
         goto fail_clear_state;
-    ret = st_resolve_all_targets();
-    if (ret != 0)
-        goto fail_tracepoint;
-    ret = st_hook_filters_build();
+    ret = st_hook_targets_resolve();
     if (ret != 0)
         goto fail_tracepoint;
 
@@ -758,8 +695,7 @@ int st_syscall_hook_init(void){
         filter = &st_hook_filters[filter_index];
         ret = ftrace_set_filter_ip(&st_syscall_ftrace_ops, filter->original_ip, 0, 0);
         if (ret != 0) {
-            pr_err("syscall_throttle: filtro Ftrace " "indice=%zu, indirizzo=%px fallito: " "errore=%d\n",
-                filter_index, (void *)filter->original_ip, ret);
+            pr_err("syscall_throttle: filtro Ftrace " "indice=%zu, indirizzo=%px fallito: " "errore=%d\n", filter_index, (void *)filter->original_ip, ret);
             goto fail_remove_filters;
         }
 
@@ -774,21 +710,7 @@ int st_syscall_hook_init(void){
 
     WRITE_ONCE(st_hook_accepting_calls, true);
     WRITE_ONCE(st_hook_installed, true);
-    explicit_count = 0U;
-    nonreturning_count = 0U;
-
-    for (syscall_nr = 0; syscall_nr < ARRAY_SIZE(st_hook_targets); syscall_nr++) {
-        if (st_hook_targets[syscall_nr].explicit_entry)
-            explicit_count++;
-
-        if (st_hook_targets[syscall_nr].nonreturning)
-            nonreturning_count++;
-    }
-
-    pr_info("syscall_throttle: hook Ftrace x86-64 " "installato: target=%zu, definizioni=%zu, "
-        "esplicite=%zu, implicite=%zu, " "filtri_unici=%zu, nonreturning=%zu\n",
-        ARRAY_SIZE(st_hook_targets), ARRAY_SIZE(st_syscall_definitions), explicit_count,
-        ARRAY_SIZE(st_hook_targets) - explicit_count, st_hook_filter_count, nonreturning_count);
+    pr_info("syscall_throttle: hook Ftrace installato\n");
     return 0;
 
 fail_remove_filters:
@@ -803,7 +725,6 @@ fail_clear_state:
 }
 
 void st_syscall_hook_exit(void){
-    size_t removed_filter_count;
     int unregister_ret;
 
     if (!READ_ONCE(st_hook_installed))
@@ -815,7 +736,7 @@ void st_syscall_hook_exit(void){
         pr_err("syscall_throttle: rimozione funzione Ftrace " "fallita: errore=%d\n", unregister_ret);
     }
 
-    removed_filter_count = st_hook_filters_remove("rimozione");
+    st_hook_filters_remove("rimozione");
 
     /* Mantiene il tracepoint attivo finche exit/exit_group non hanno rilasciato i riferimenti. */
     wait_event(st_hook_active_wait_queue, atomic_read(&st_hook_active_calls) == 0);
@@ -824,13 +745,7 @@ void st_syscall_hook_exit(void){
 
     WARN_ON(!list_empty(&st_nonreturning_calls));
 
-    pr_info("syscall_throttle: diagnostica nonreturning: " "avviate=%lld, completate=%lld, "
-        "ritorni_inattesi=%lld\n", (long long)atomic64_read(&st_nonreturning_started),
-        (long long)atomic64_read(&st_nonreturning_completed),
-        (long long)atomic64_read(&st_nonreturning_unexpected_returns));
-
-    pr_info("syscall_throttle: hook Ftrace x86-64 " "rimosso: filtri=%zu/%zu\n", removed_filter_count,
-        st_hook_filter_count);
+    pr_info("syscall_throttle: hook Ftrace rimosso\n");
     WRITE_ONCE(st_hook_installed, false);
 
     st_hook_runtime_clear();

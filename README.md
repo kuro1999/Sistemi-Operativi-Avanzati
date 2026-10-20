@@ -165,8 +165,7 @@ individuali o numero della syscall del peak.
 | `command` | Tabella dei comandi della CLI |
 
 `st_hook_active_calls`, la sua wait queue e i riferimenti al modulo proteggono
-l'esecuzione durante lo scaricamento. I tre contatori diagnostici nonreturning
-registrano l'attività delle syscall senza ritorno e non fanno parte dello snapshot UAPI.
+l'esecuzione durante lo scaricamento.
 
 Le altre strutture UAPI trasportano stato, UID, nomi, numeri, conteggi, MAX e
 richieste LIST con indirizzo user-space, capacità e conteggio restituito.
@@ -393,6 +392,6 @@ snapshot. Il risultato atteso e' EWOULDBLOCK per O_NONBLOCK ed EPERM aggiungendo
 O_TRUNC, sia con programma registrato sia non registrato. Le richieste sono root;
 il controller chiude il device prima che il worker esegua delete_module.
 
-Le liste con buffer insufficiente, il confronto esatto dell'integrale temporale,
-la matrice completa dei permessi e i contatori diagnostici kernel non vengono
+Le liste con buffer insufficiente, il confronto esatto dell'integrale temporale
+e la matrice completa dei permessi non vengono
 verificati automaticamente da questa versione dimostrativa.
